@@ -233,3 +233,7 @@ uploads/
 downloads/
 cache/
 .cache/
+
+# Application logs
+app.log
+logs/
