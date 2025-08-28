@@ -1,0 +1,299 @@
+Project Specification: Local AI Agent Backend with Celery and Ollama Integration
+1. Project Overview
+This project aims to build a scalable, modular backend system that powers local AI agent tasks using LLM models hosted via Ollama. The system will include a Celery-based worker for asynchronous task processing and a RESTful API for interacting with agents. It emphasizes modern best practices such as separation of concerns, containerization for portability, and a flexible local database to support future expansions like multi-agent workflows, memory management, tool integrations, and state persistence.
+The backend will run on the latest Ubuntu Server (e.g., Ubuntu 24.04 LTS) and be fully dockerized using Docker Compose. This ensures easy deployment, isolation, and reproducibility. Agentic workflows will be designed around common patterns: task decomposition, tool calling, reasoning loops, and persistent storage for conversation history, embeddings, and agent states.
+Key goals:
+
+Enable local, privacy-focused AI agents without external API dependencies.
+Support extensibility for advanced features like RAG (Retrieval-Augmented Generation), multi-agent collaboration, and custom tools.
+Follow principles of clean architecture: layers for API, business logic (agents/tasks), data access, and workers.
+
+2. Requirements
+Functional Requirements
+
+API Endpoints: Provide endpoints to create, manage, and execute AI agent tasks (e.g., /agents/run for triggering a task, /agents/status for checking progress).
+Task Queuing: Use Celery to handle asynchronous tasks like LLM inference, agent planning, and tool execution.
+Ollama Integration: Interact with Ollama's API (e.g., via HTTP requests) for model inference. Assume Ollama runs locally or in a Docker container.
+Data Storage: Store agent states, task histories, embeddings, and configurations in a local DB. Support relational data (e.g., user sessions) and vector data (e.g., for RAG).
+Agent Workflows: Initially support simple agent tasks (e.g., query processing with Ollama). Design for future additions like planning, reflection, and multi-agent orchestration.
+Error Handling and Logging: Robust retries with exponential backoff, structured logging to files/DB, health checks, and monitoring endpoints.
+Real-time Logging System: Pub/sub architecture for live log streaming with Redis Streams, persistent storage in PostgreSQL, and WebSocket endpoints for real-time subscriptions.
+Configuration Management: Environment-based configuration with validation and secrets management.
+API Documentation: Auto-generated OpenAPI/Swagger documentation with examples.
+
+Non-Functional Requirements
+
+Performance: Handle concurrent tasks efficiently; Celery workers should scale horizontally.
+Security: Local-only access; use environment variables for secrets. No internet exposure initially.
+Portability: Fully containerized; easy to run on any Docker-supported host.
+Maintainability: Modular code structure with clear separation (e.g., MVC-like pattern).
+Scalability: Design allows adding more workers or services without major refactoring.
+
+Assumptions
+
+Ollama is pre-installed or dockerized separately, exposing its API at http://whyland-ai.nakedsun.xyz:11434.
+Initial focus on Python-based implementation.
+No frontend; API-only for now, consumable by future clients (e.g., CLI or web apps).
+
+3. Technology Stack
+
+Programming Language: Python 3.12 (for modern features and compatibility).
+API Framework: FastAPI (async, type-safe, auto-docs with Swagger).
+Task Queue: Celery (with Redis as broker and result backend).
+Pub/Sub System: Redis Streams for real-time log streaming and event broadcasting.
+Database: PostgreSQL with pgvector extension (relational + vector capabilities for hybrid AI data; local, robust, and extensible over SQLite).
+Ollama Client: ollama Python library or direct HTTP requests via requests or aiohttp.
+Agent Framework: LangChain (for agent building, tools, and chains; lightweight to start, avoid overkill as per common critiques).
+Containerization: Docker and Docker Compose.
+Other Libraries:
+
+SQLAlchemy + Alembic for ORM and migrations.
+Pydantic for data validation and settings management.
+Loguru for structured logging.
+prometheus-client for metrics collection.
+asyncpg for high-performance async PostgreSQL driver.
+aioredis for async Redis operations.
+python-multipart for file uploads.
+websockets for WebSocket support.
+sse-starlette for server-sent events.
+redis-py with Redis Streams support for pub/sub.
+pytest + pytest-asyncio for testing.
+black + isort + flake8 for code formatting and linting.
+
+
+
+Rationale:
+
+FastAPI + Celery is a proven combo for async APIs with background tasks.
+PostgreSQL/pgvector supports future AI needs like embedding storage for RAG, while handling relational data.
+LangChain provides agent primitives without excessive abstraction.
+
+4. Architecture
+High-Level Design
+The system follows a layered architecture to ensure separation of concerns:
+
+API Layer: Handles incoming requests, validates inputs, and enqueues tasks.
+Business Logic Layer: Defines agents, tasks, and workflows (e.g., agent planners, tool callers).
+Data Access Layer: Abstracts DB interactions (e.g., repositories for agents, tasks, embeddings).
+Worker Layer: Celery processes tasks asynchronously, interacting with Ollama and DB.
+External Services: Ollama for LLM, Redis for queuing.
+
+Text-based diagram:
+text[Client (e.g., CLI/Web)] --> [FastAPI API] --> [Celery Task Queue (Redis)]
+                                                   |
+                                                   v
+[Ollama LLM API] <--> [Celery Workers] <--> [PostgreSQL DB (with pgvector)]
+
+Workflow Example:
+
+API receives a task request (e.g., "Summarize this text").
+Enqueues a Celery task and creates log stream.
+Worker pulls task, publishes real-time logs to Redis Stream, calls Ollama for inference.
+Logs are simultaneously persisted to PostgreSQL and streamed via WebSocket/SSE.
+Frontends can subscribe to live logs or query historical data.
+
+
+
+This mirrors common agentic patterns: decomposition (break tasks into sub-tasks), execution (call tools/LLMs), persistence (store states for continuity).
+Modularity for Future Expansions
+
+Use Python modules/packages:
+
+api/: Routes and controllers.
+agents/: Agent definitions, tools, chains.
+tasks/: Celery task functions.
+db/: Models, repositories, migrations.
+utils/: Helpers (e.g., logging, Ollama client).
+
+
+Dependency injection (e.g., via FastAPI's Depends) for loose coupling.
+
+5. Components
+5.1 API Provider (FastAPI)
+
+Base path: /api/v1.
+Endpoints:
+
+POST /agents/create: Create an agent config (e.g., model, tools).
+GET /agents: List all agents.
+GET /agents/{agent_id}: Get agent details.
+PUT /agents/{agent_id}: Update agent config.
+DELETE /agents/{agent_id}: Delete an agent.
+POST /agents/run: Enqueue a task (returns task ID).
+GET /tasks/{task_id}/status: Check task status/result.
+GET /tasks/{task_id}/logs: Get task execution logs with pagination and filtering.
+DELETE /tasks/{task_id}: Cancel a running task.
+GET /tasks: List all tasks with filtering options.
+GET /logs/stream/{task_id}: Server-sent events for real-time task logs.
+GET /logs/history: Query historical logs with advanced filtering.
+WebSocket /ws/logs: Real-time log streaming with subscription filters.
+WebSocket /ws/tasks/{task_id}: Real-time updates for specific task.
+GET /health: System health check.
+GET /metrics: Prometheus-compatible metrics endpoint.
+
+
+Async endpoints for efficiency.
+Authentication: Basic JWT or API keys for future.
+
+5.2 Celery Worker
+
+Tasks: process_agent_task(task_data) – Calls Ollama, handles logic, stores in DB.
+Configuration: Use celery.py for setup; enable retries (e.g., max 3), timeouts.
+Best Practices:
+
+One worker per queue initially (e.g., 'ai_tasks').
+Use --concurrency=4 for multi-threading (adjust based on hardware).
+Health checks via Celery's remote ping.
+Logging: Centralized to DB or files.
+
+
+
+5.3 Database Schema (PostgreSQL)
+
+Tables:
+
+agents: ID, name, description, model_name, config (JSONB), created_at, updated_at, is_active.
+tasks: ID, agent_id, status (pending/running/completed/failed), input (JSONB), output (JSONB), error_message, retry_count, created_at, started_at, completed_at.
+embeddings: ID, task_id, vector (pgvector), content_hash, metadata (JSONB), created_at.
+sessions: ID, agent_id, session_data (JSONB), created_at, updated_at.
+task_logs: ID, task_id, agent_id, level (info/debug/warning/error/critical), message, context (JSONB), timestamp, stream_id.
+log_subscriptions: ID, session_id, filters (JSONB), created_at, last_seen_timestamp.
+agent_tools: ID, agent_id, tool_name, tool_config (JSONB), is_enabled.
+
+Indexes:
+- task_logs: Composite index on (task_id, timestamp), (agent_id, timestamp), (level, timestamp)
+- task_logs: Index on stream_id for Redis Streams correlation
+
+
+Use pgvector for vector indexes (e.g., HNSW for fast similarity search).
+Migrations with Alembic for schema evolution.
+
+5.4 Ollama Integration
+
+Client wrapper: Async function to call /api/generate or /api/chat.
+Error handling: Retry on timeouts, fallback models.
+
+6. Docker Setup
+Docker Compose Structure
+Use a docker-compose.yml for services:
+
+api: FastAPI app.
+worker: Celery worker.
+redis: Broker/backend.
+db: PostgreSQL with pgvector.
+(Optional) ollama: If not running natively.
+
+Example snippet:
+yamlservices:
+  db:
+    image: pgvector/pgvector:pg16
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: secret
+  redis:
+    image: redis:7
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://user:secret@db:5432/ai_db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+  worker:
+    build: .
+    command: celery -A app.celery worker --loglevel=info
+    depends_on:
+      - db
+      - redis
+    environment: # Same as api
+volumes:
+  db_data:
+Setup Instructions
+
+Install Docker and Docker Compose on Ubuntu: sudo apt install docker.io docker-compose.
+Clone repo, build: docker-compose build.
+Run: docker-compose up -d.
+Migrate DB: docker-compose exec api alembic upgrade head.
+Access API at http://localhost:8000/docs.
+
+Best Practices:
+
+Use multi-stage Dockerfiles for slim images.
+Healthchecks in Compose (e.g., for DB readiness).
+Volumes for persistence.
+Scale workers: docker-compose up --scale worker=3.
+
+7. Implementation Guidelines
+
+Code Structure:
+textproject/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI app entry point
+│   ├── celery_app.py        # Celery configuration
+│   ├── config.py            # Settings and configuration
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── routes/          # API route handlers
+│   │   ├── dependencies.py  # FastAPI dependencies
+│   │   └── middleware.py    # Custom middleware
+│   ├── agents/
+│   │   ├── __init__.py
+│   │   ├── base.py          # Base agent class
+│   │   ├── simple_agent.py  # Basic agent implementation
+│   │   └── tools/           # Agent tools
+│   ├── tasks/
+│   │   ├── __init__.py
+│   │   └── agent_tasks.py   # Celery task definitions
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── models/          # SQLAlchemy models
+│   │   ├── repositories/    # Data access layer
+│   │   └── database.py      # DB connection and session management
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── ollama_client.py # Ollama integration
+│   │   ├── agent_service.py # Business logic
+│   │   ├── log_service.py   # Logging and streaming service
+│   │   └── pubsub_service.py # Redis Streams pub/sub
+│   └── utils/
+│       ├── __init__.py
+│       ├── logging.py       # Logging configuration
+│       └── metrics.py       # Prometheus metrics
+├── alembic/                 # Database migrations
+├── tests/
+│   ├── __init__.py
+│   ├── test_api/           # API tests
+│   ├── test_agents/        # Agent tests
+│   └── test_tasks/         # Task tests
+├── scripts/
+│   ├── init_db.py          # Database initialization
+│   └── run_worker.py       # Worker startup script
+├── .env.example            # Environment variables template
+├── Dockerfile
+├── docker-compose.yml
+├── docker-compose.dev.yml  # Development override
+├── requirements.txt        # Dependencies
+├── requirements-dev.txt    # Development dependencies
+├── pyproject.toml          # Project configuration
+└── README.md
+
+Testing: Unit tests with pytest; integration tests for API and tasks.
+CI/CD: GitHub Actions for linting (black, flake8) and tests.
+Monitoring: Add /metrics endpoint with Prometheus.
+Security: Validate all inputs; sanitize Ollama responses.
+
+8. Future Expansions
+
+Multi-Agent Support: Add orchestration (e.g., via LangGraph for workflows).
+Advanced Agents: Integrate tools (e.g., web search, file ops) using LangChain tools.
+Memory Management: Long-term memory in DB; short-term in Redis.
+RAG Enhancements: Index documents in pgvector; add retrieval chains.
+Scaling: Kubernetes if outgrowing Docker Compose; more queues for task types.
+UI/CLI: Add a frontend or CLI client.
+Monitoring Tools: Integrate ELK stack or Grafana for logs/metrics.
+
+This spec provides a solid foundation. Start with a minimal viable product (MVP): basic API, one Celery task calling Ollama, and DB storage. Iterate based on needs.
