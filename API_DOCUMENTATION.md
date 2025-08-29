@@ -522,13 +522,28 @@ curl http://localhost:8000/api/v1/security/incidents?severity=low
 | `GET` | `/api/v1/health` | System health check | ❌ |
 | `GET` | `/api/v1/ready` | Readiness check | ❌ |
 | `GET` | `/api/v1/metrics` | Prometheus metrics | ✅ |
+| `GET` | `/api/v1/system/metrics` | System utilization metrics (CPU, Memory, GPU, Disk, Network) | ❌ |
+| `GET` | `/api/v1/system/metrics/cpu` | CPU utilization metrics | ❌ |
+| `GET` | `/api/v1/system/metrics/memory` | Memory utilization metrics | ❌ |
+| `GET` | `/api/v1/system/metrics/disk` | Disk utilization metrics | ❌ |
+| `GET` | `/api/v1/system/metrics/network` | Network utilization metrics | ❌ |
+| `GET` | `/api/v1/system/metrics/gpu` | GPU utilization metrics (NVIDIA) | ❌ |
+
+### 🤖 Ollama Endpoints
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| `GET` | `/api/v1/ollama/models` | List all available Ollama models with metadata | ❌ |
+| `GET` | `/api/v1/ollama/models/names` | List available model names only | ❌ |
+| `GET` | `/api/v1/ollama/health` | Check Ollama server health | ❌ |
+| `POST` | `/api/v1/ollama/models/pull/{model_name}` | Pull/download a new model | ❌ |
 
 ### 🤖 Agent Management Endpoints
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `POST` | `/api/v1/agents/create` | Create new agent | ✅ |
-| `GET` | `/api/v1/agents` | List all agents | ❌ |
+| `POST` | `/api/v1/agents/create` | Create new agent (static or dynamic) | ✅ |
+| `GET` | `/api/v1/agents` | List all agents with filtering | ❌ |
 | `GET` | `/api/v1/agents/{agent_id}` | Get specific agent | ❌ |
 | `PUT` | `/api/v1/agents/{agent_id}` | Update agent | ✅ |
 | `DELETE` | `/api/v1/agents/{agent_id}` | Delete agent | ✅ |
@@ -537,8 +552,8 @@ curl http://localhost:8000/api/v1/security/incidents?severity=low
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| `POST` | `/api/v1/tasks/run` | Execute task | ✅ |
-| `GET` | `/api/v1/tasks` | List tasks | ❌ |
+| `POST` | `/api/v1/tasks/run` | Execute task (supports both static and dynamic agents) | ✅ |
+| `GET` | `/api/v1/tasks` | List tasks with filtering | ❌ |
 | `GET` | `/api/v1/tasks/{task_id}/status` | Get task status | ❌ |
 | `DELETE` | `/api/v1/tasks/{task_id}` | Cancel task | ✅ |
 
@@ -696,7 +711,7 @@ Generated documentation includes:
 
 ### Example 1: Create and Test an Agent
 
-**Step 1: Create Agent**
+**Step 1: Create Static Agent (Legacy)**
 ```json
 POST /api/v1/agents/create
 {
@@ -707,6 +722,45 @@ POST /api/v1/agents/create
     "temperature": 0.3,
     "max_tokens": 500,
     "system_prompt": "You are a helpful AI assistant that creates concise summaries."
+  }
+}
+```
+
+**Model Selection Workflow:**
+```javascript
+// 1. Get available models
+const modelsResponse = await fetch('/api/v1/ollama/models/names');
+const { models } = await modelsResponse.json();
+
+// 2. User selects model from dropdown/interface
+const selectedModel = models[0]; // e.g., "llama2"
+
+// 3. Create agent with selected model
+const agentResponse = await fetch('/api/v1/agents/create', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer your-api-key'
+  },
+  body: JSON.stringify({
+    name: "My Custom Agent",
+    description: "Agent using selected model",
+    model_name: selectedModel,
+    config: { temperature: 0.7 }
+  })
+});
+```
+
+**Step 1 Alternative: Create Dynamic Agent**
+```json
+POST /api/v1/agents/create
+{
+  "name": "Email Analyzer",
+  "description": "Dynamic agent for analyzing emails",
+  "agent_type": "email_analyzer",
+  "config": {
+    "importance_threshold": 0.7,
+    "categories": ["urgent", "important", "normal"]
   }
 }
 ```
@@ -840,6 +894,15 @@ eventSource.onmessage = function(event) {
 **List Agents with Filters:**
 ```
 GET /api/v1/agents?active_only=true&limit=20&offset=0
+GET /api/v1/agents?agent_type=email_analyzer&include_dynamic=true&limit=10
+GET /api/v1/agents?include_dynamic=false  # Only static agents
+```
+
+**List Tasks with Filters:**
+```
+GET /api/v1/tasks?agent_id=uuid&status=completed&limit=50
+GET /api/v1/tasks?agent_type=email_analyzer&include_dynamic=true
+GET /api/v1/tasks?status=running&limit=20&offset=0
 ```
 
 **Historical Logs with Search:**
@@ -900,9 +963,187 @@ GET /api/v1/metrics
 agent_tasks_total{agent_id="123",status="completed"} 45
 agent_tasks_total{agent_id="123",status="failed"} 2
 
-# HELP api_requests_total Total API requests  
+# HELP api_requests_total Total API requests
 # TYPE api_requests_total counter
 api_requests_total{method="POST",endpoint="/agents/create",status_code="200"} 12
+```
+
+### System Utilization Metrics
+
+The system provides comprehensive hardware utilization monitoring:
+
+**Get All System Metrics:**
+```bash
+GET /api/v1/system/metrics
+```
+
+**Response:**
+```json
+{
+  "timestamp": "2025-08-29T15:57:43.134767Z",
+  "cpu": {
+    "usage_percent": 0.3,
+    "frequency_mhz": {"current": 2.89, "min": 3000.0, "max": 3000.0},
+    "count": {"physical": 64, "logical": 64}
+  },
+  "memory": {
+    "total_gb": 157.24,
+    "used_gb": 11.92,
+    "usage_percent": 8.8
+  },
+  "gpu": [
+    {
+      "index": 0,
+      "name": "Tesla P40",
+      "utilization": {"gpu_percent": 0, "memory_percent": 0},
+      "memory": {"used_mb": 139, "total_mb": 24576},
+      "temperature_fahrenheit": 78.8,
+      "power": {"usage_watts": 9.92, "limit_watts": 250.0}
+    }
+  ]
+}
+```
+
+**Individual Metrics Endpoints:**
+```bash
+# CPU metrics
+GET /api/v1/system/metrics/cpu
+
+# Memory metrics
+GET /api/v1/system/metrics/memory
+
+# Disk metrics
+GET /api/v1/system/metrics/disk
+
+# Network metrics
+GET /api/v1/system/metrics/network
+
+# GPU metrics (NVIDIA GPUs)
+GET /api/v1/system/metrics/gpu
+```
+
+**Supported Metrics:**
+- **CPU**: Usage percentage, frequency, core counts, time breakdowns
+- **Memory**: Total/used/free in GB, usage percentage, buffers/cached
+- **GPU**: Utilization %, memory usage, temperature (°F), clock frequencies, power (NVIDIA)
+- **Disk**: Usage statistics and I/O metrics
+- **Network**: Traffic statistics and interface information
+
+### System Monitoring Integration
+
+The system metrics endpoints are designed for seamless frontend integration:
+
+**Real-time Monitoring:**
+```javascript
+// Fetch system metrics every 5 seconds
+setInterval(async () => {
+  const response = await fetch('/api/v1/system/metrics');
+  const metrics = await response.json();
+
+  // Update dashboard with metrics
+  updateDashboard(metrics);
+}, 5000);
+```
+
+**GPU Temperature Monitoring (Tesla P40):**
+```javascript
+const gpuMetrics = await fetch('/api/v1/system/metrics/gpu');
+const gpus = await gpuMetrics.json();
+
+gpus.gpus.forEach((gpu, index) => {
+  console.log(`GPU ${index} (${gpu.name}): ${gpu.temperature_fahrenheit}°F`);
+});
+```
+
+**Resource Usage Alerts:**
+```javascript
+const systemMetrics = await fetch('/api/v1/system/metrics');
+const { cpu, memory, gpu } = await systemMetrics.json();
+
+// Check for high usage
+if (cpu.usage_percent > 80) {
+  alert('High CPU usage detected!');
+}
+
+if (memory.usage_percent > 90) {
+  alert('High memory usage detected!');
+}
+```
+
+### Ollama Model Management
+
+The system provides comprehensive Ollama model management capabilities:
+
+**Get Available Models:**
+```bash
+GET /api/v1/ollama/models
+```
+
+**Response:**
+```json
+{
+  "models": [
+    {
+      "name": "llama2",
+      "size": 3791730599,
+      "modified_at": "2024-01-01T00:00:00Z",
+      "digest": "sha256:123..."
+    },
+    {
+      "name": "codellama",
+      "size": 5377541952,
+      "modified_at": "2024-01-01T00:00:00Z",
+      "digest": "sha256:456..."
+    }
+  ]
+}
+```
+
+**Get Model Names Only:**
+```bash
+GET /api/v1/ollama/models/names
+```
+
+**Response:**
+```json
+{
+  "models": ["llama2", "codellama", "mistral"]
+}
+```
+
+**Pull New Models:**
+```bash
+POST /api/v1/ollama/models/pull/llama2:13b
+```
+
+**Frontend Integration for Model Selection:**
+```javascript
+// Fetch available models for dropdown
+const modelsResponse = await fetch('/api/v1/ollama/models/names');
+const { models } = await modelsResponse.json();
+
+// Populate dropdown
+const modelSelect = document.getElementById('model-select');
+models.forEach(model => {
+  const option = document.createElement('option');
+  option.value = model;
+  option.textContent = model;
+  modelSelect.appendChild(option);
+});
+```
+
+**Check Ollama Health:**
+```bash
+GET /api/v1/ollama/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "models_available": 5,
+  "default_model": "llama2"
+}
 ```
 
 ## 🛠️ Testing Tools
@@ -917,6 +1158,16 @@ api_requests_total{method="POST",endpoint="/agents/create",status_code="200"} 12
 ```bash
 # Health check
 curl http://localhost:8000/api/v1/health
+
+# System metrics
+curl http://localhost:8000/api/v1/system/metrics
+curl http://localhost:8000/api/v1/system/metrics/cpu
+curl http://localhost:8000/api/v1/system/metrics/gpu
+
+# Ollama model management
+curl http://localhost:8000/api/v1/ollama/models
+curl http://localhost:8000/api/v1/ollama/models/names
+curl http://localhost:8000/api/v1/ollama/health
 
 # Create agent (with auth)
 curl -X POST http://localhost:8000/api/v1/agents/create \
@@ -958,12 +1209,14 @@ http POST localhost:8000/api/v1/agents/create Authorization:"Bearer api-key" nam
 ## 🎉 Next Steps
 
 1. **Explore Swagger UI**: http://localhost:8000/docs
-2. **Read Agent Documentation**: http://localhost:8000/api/v1/docs/agent-creation
-3. **Test basic workflows**: Create agent → Run task → Check logs
-4. **Try WebSocket connections** for real-time updates
-5. **Monitor with Flower**: http://localhost:5555
-6. **Check database**: http://localhost:8080
-7. **Generate Agent-Specific Docs**: Use `/api/v1/agent-types/{type}/documentation`
+2. **Monitor System Performance**: Check `/api/v1/system/metrics` for hardware utilization
+3. **Browse Available Models**: Use `/api/v1/ollama/models` to see available Ollama models
+4. **Read Agent Documentation**: http://localhost:8000/api/v1/docs/agent-creation
+5. **Test basic workflows**: Create agent → Run task → Check logs
+6. **Try WebSocket connections** for real-time updates
+7. **Monitor with Flower**: http://localhost:5555
+8. **Check database**: http://localhost:8080
+9. **Generate Agent-Specific Docs**: Use `/api/v1/agent-types/{type}/documentation`
 
 The API is now ready for integration with your applications! 🚀
 
