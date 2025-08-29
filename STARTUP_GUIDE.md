@@ -9,8 +9,10 @@ Before starting, ensure you have:
 - **Docker** and **Docker Compose** installed
 - **Git** for cloning the repository
 - **Ollama** running and accessible (our example uses `http://whyland-ai.nakedsun.xyz:11434`)
+- **Python dependencies**: `psutil` and `pynvml` (automatically installed via requirements.txt)
 - At least **4GB RAM** available for containers
 - **Ports available**: 8000 (API), 5432 (PostgreSQL), 6379 (Redis), 5555 (Flower), 8080 (Adminer)
+- **NVIDIA GPU** (optional): For GPU monitoring with Tesla P40 support
 
 ## 🔧 Quick Start (Recommended)
 
@@ -88,7 +90,8 @@ Once started, you can access:
 | **📖 ReDoc Documentation** | http://localhost:8000/redoc | Alternative API docs |
 | **🌸 Flower (Celery Monitor)** | http://localhost:5555 | Monitor background tasks |
 | **🗄️ Adminer (Database UI)** | http://localhost:8080 | Database browser |
-| **📊 Metrics** | http://localhost:8000/api/v1/metrics | Prometheus metrics |
+| **📊 Prometheus Metrics** | http://localhost:8000/api/v1/metrics | Application metrics |
+| **🖥️ System Metrics** | http://localhost:8000/api/v1/system/metrics | CPU, Memory, GPU, Disk, Network |
 
 ### Database Connection via Adminer
 - **Server**: `db`
@@ -141,6 +144,19 @@ curl -X POST "http://localhost:8000/api/v1/tasks/run" \
 **Check Task Status:**
 ```bash
 curl "http://localhost:8000/api/v1/tasks/YOUR_TASK_ID_HERE/status"
+```
+
+**Monitor System Metrics:**
+```bash
+# Get all system metrics (CPU, Memory, GPU, Disk, Network)
+curl "http://localhost:8000/api/v1/system/metrics"
+
+# Get specific metrics
+curl "http://localhost:8000/api/v1/system/metrics/cpu"
+curl "http://localhost:8000/api/v1/system/metrics/memory"
+curl "http://localhost:8000/api/v1/system/metrics/gpu"
+curl "http://localhost:8000/api/v1/system/metrics/disk"
+curl "http://localhost:8000/api/v1/system/metrics/network"
 ```
 
 ### Method 3: WebSocket Testing
@@ -239,6 +255,15 @@ curl http://localhost:8000/api/v1/health
 curl http://localhost:8000/api/v1/ready
 ```
 
+**System Metrics Health:**
+```bash
+# Test system metrics collection
+curl http://localhost:8000/api/v1/system/metrics/cpu
+curl http://localhost:8000/api/v1/system/metrics/gpu
+
+# Should return JSON with system utilization data
+```
+
 **Service Status:**
 ```bash
 # Check all containers
@@ -296,11 +321,36 @@ docker-compose up -d --scale worker=5
 #   replicas: 5
 ```
 
+### System Monitoring
+
+The Agentic Backend provides comprehensive system monitoring capabilities:
+
+**Available Metrics:**
+- **CPU**: Usage percentage, frequency, core counts, time breakdowns
+- **Memory**: Total/used/free in GB, usage percentage, buffers/cached
+- **GPU**: Utilization, memory usage, temperature (°F), clock frequencies, power (NVIDIA GPUs)
+- **Disk**: Usage statistics and I/O metrics
+- **Network**: Traffic statistics and interface information
+
+**Monitoring Endpoints:**
+```bash
+# All system metrics
+curl http://localhost:8000/api/v1/system/metrics
+
+# Individual metrics
+curl http://localhost:8000/api/v1/system/metrics/cpu
+curl http://localhost:8000/api/v1/system/metrics/memory
+curl http://localhost:8000/api/v1/system/metrics/gpu
+```
+
+**Integration with Frontend:**
+The system metrics endpoints are designed for easy frontend integration, providing real-time system monitoring data in JSON format perfect for dashboards and monitoring displays.
+
 ### Production Considerations
 
 1. **Security**: Change all default passwords and keys
 2. **SSL/TLS**: Add reverse proxy (nginx) with SSL
-3. **Monitoring**: Set up Grafana + Prometheus
+3. **Monitoring**: Set up Grafana + Prometheus with system metrics
 4. **Backup**: Configure PostgreSQL backups
 5. **Resource Limits**: Set Docker memory/CPU limits
 
@@ -308,9 +358,10 @@ docker-compose up -d --scale worker=5
 
 1. **Read the API Documentation**: http://localhost:8000/docs
 2. **Create your first agent** using the Swagger UI
-3. **Test real-time logging** via WebSocket
-4. **Monitor tasks** using Flower
-5. **Explore the database** using Adminer
+3. **Monitor system performance** with `/api/v1/system/metrics`
+4. **Test real-time logging** via WebSocket
+5. **Monitor tasks** using Flower
+6. **Explore the database** using Adminer
 
 ## 🆘 Getting Help
 

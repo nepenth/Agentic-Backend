@@ -6,6 +6,8 @@ from .health import router as health_router
 from .websocket import router as websocket_router
 from .auth import router as auth_router
 from .security import router as security_router
+from .system_metrics import router as system_metrics_router
+from .ollama import router as ollama_router
 
 # Create main API router
 api_router = APIRouter(prefix="/api/v1")
@@ -17,6 +19,8 @@ api_router.include_router(agents_router, prefix="/agents", tags=["agents"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(logs_router, prefix="/logs", tags=["logs"])
 api_router.include_router(security_router, prefix="/security", tags=["security"])
+api_router.include_router(system_metrics_router, tags=["system"])
+api_router.include_router(ollama_router, prefix="/ollama", tags=["ollama"])
 
 # WebSocket routes don't use /api/v1 prefix
 ws_router = APIRouter()
