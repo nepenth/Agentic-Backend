@@ -5,7 +5,9 @@ from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field
 from app.db.models.agent import Agent
+from app.db.models.agent_type import AgentType
 from app.api.dependencies import get_db_session, verify_api_key
+from app.services.schema_manager import SchemaManager
 from app.utils.logging import get_logger
 
 logger = get_logger("agents_api")
@@ -17,6 +19,7 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     model_name: str = Field(default="llama2", min_length=1, max_length=255)
     config: Optional[dict] = Field(default_factory=dict)
+    agent_type: Optional[str] = Field(None, description="Agent type for dynamic agents")
 
 
 class AgentUpdate(BaseModel):
@@ -43,22 +46,49 @@ async def create_agent(
     agent_data: AgentCreate,
     db: AsyncSession = Depends(get_db_session)
 ):
-    """Create a new agent."""
+    """Create a new agent (static or dynamic)."""
     try:
-        agent = Agent(
-            name=agent_data.name,
-            description=agent_data.description,
-            model_name=agent_data.model_name,
-            config=agent_data.config or {}
-        )
-        
+        # Check if this is a dynamic agent creation
+        if agent_data.agent_type:
+            # Dynamic agent - validate agent type exists
+            schema_manager = SchemaManager(db)
+            agent_type_obj = await schema_manager.get_agent_type(agent_data.agent_type)
+
+            if not agent_type_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Agent type '{agent_data.agent_type}' not found"
+                )
+
+            # Create dynamic agent
+            agent = Agent(
+                name=agent_data.name,
+                description=agent_data.description,
+                model_name=agent_data.model_name,
+                config=agent_data.config or {},
+                agent_type_id=agent_type_obj.id
+            )
+
+            logger.info(f"Created dynamic agent: {agent_data.name} of type {agent_data.agent_type}")
+        else:
+            # Static agent (legacy)
+            agent = Agent(
+                name=agent_data.name,
+                description=agent_data.description,
+                model_name=agent_data.model_name,
+                config=agent_data.config or {}
+            )
+
+            logger.info(f"Created static agent: {agent_data.name}")
+
         db.add(agent)
         await db.commit()
         await db.refresh(agent)
-        
-        logger.info(f"Created agent: {agent.id} - {agent.name}")
+
         return AgentResponse(**agent.to_dict())
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create agent: {e}")
         await db.rollback()
@@ -71,6 +101,8 @@ async def create_agent(
 @router.get("", response_model=List[AgentResponse])
 async def list_agents(
     active_only: bool = True,
+    agent_type: Optional[str] = Query(None, description="Filter by agent type (for dynamic agents)"),
+    include_dynamic: bool = Query(True, description="Include dynamic agents in results"),
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db_session)
@@ -78,17 +110,32 @@ async def list_agents(
     """List all agents with optional filtering."""
     try:
         query = select(Agent)
-        
+
         if active_only:
             query = query.where(Agent.is_active == True)
-        
+
+        # Filter by agent type if specified
+        if agent_type:
+            # Join with AgentType to filter by type name
+            from sqlalchemy import and_
+            query = query.join(AgentType, Agent.agent_type_id == AgentType.id)
+            query = query.where(AgentType.type_name == agent_type)
+
+        # Filter dynamic vs static agents
+        if not include_dynamic:
+            # Only static agents (no agent_type_id)
+            query = query.where(Agent.agent_type_id.is_(None))
+        elif include_dynamic is False:
+            # This would be an explicit request to exclude dynamic agents
+            query = query.where(Agent.agent_type_id.is_(None))
+
         query = query.offset(offset).limit(limit).order_by(Agent.created_at.desc())
-        
+
         result = await db.execute(query)
         agents = result.scalars().all()
-        
+
         return [AgentResponse(**agent.to_dict()) for agent in agents]
-        
+
     except Exception as e:
         logger.error(f"Failed to list agents: {e}")
         raise HTTPException(

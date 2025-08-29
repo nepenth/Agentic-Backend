@@ -5,6 +5,7 @@ from .embedding import Embedding
 from .tool import AgentTool
 from .subscription import LogSubscription
 from .user import User
+from .agent_type import AgentType, DynamicTable, AgentBuilderSession, RegisteredTool, AgentDeletionLog
 
 __all__ = [
     "Agent",
@@ -15,4 +16,9 @@ __all__ = [
     "AgentTool",
     "LogSubscription",
     "User",
+    "AgentType",
+    "DynamicTable", 
+    "AgentBuilderSession",
+    "RegisteredTool",
+    "AgentDeletionLog",
 ]
