@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from app.config import settings
 from app.utils.logging import setup_logging
 from app.api.middleware import LoggingMiddleware
+from app.api.security_middleware import AgentSecurityMiddleware, RequestValidationMiddleware
 from app.api.routes import api_router, ws_router
 from app.utils.logging import get_logger
 
@@ -44,14 +45,25 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=[
+        "https://whyland-ai.nakedsun.xyz",
+        "https://whyland-ai.nakedsun.xyz:3443",  # Frontend with port
+        "https://localhost:3000",
+        "https://127.0.0.1:3000",
+        "http://localhost:3000",  # For development
+        "http://127.0.0.1:3000"   # For development
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
 # Add custom middleware
 app.add_middleware(LoggingMiddleware)
+
+# Add security middleware (order matters - security should be early)
+app.add_middleware(RequestValidationMiddleware)
+app.add_middleware(AgentSecurityMiddleware)
 
 # Include routers
 app.include_router(api_router)

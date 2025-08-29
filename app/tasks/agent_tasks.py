@@ -8,10 +8,16 @@ from sqlalchemy import select, update
 from app.celery_app import celery_app
 from app.db.models.task import Task as TaskModel, TaskStatus
 from app.db.models.agent import Agent
+from app.db.models.agent_type import AgentType
 from app.db.database import get_session_context
 from app.services.ollama_client import ollama_client
 from app.services.log_service import log_service
 from app.agents.simple_agent import SimpleAgent
+from app.agents.dynamic_agent import DynamicAgent
+from app.agents.factory import AgentFactory
+from app.services.schema_manager import SchemaManager
+from app.services.security_service import SecurityService
+from app.agents.tools.registry import ToolRegistry
 from app.utils.logging import get_logger
 from app.utils.metrics import MetricsCollector, Timer
 
@@ -114,23 +120,32 @@ async def _process_agent_task_async(
         async with get_session_context() as session:
             result = await session.execute(select(Agent).where(Agent.id == agent_uuid))
             agent = result.scalar_one_or_none()
-            
+
             if not agent:
                 error_msg = f"Agent {agent_id} not found"
                 await log_service.log_error(task_uuid, agent_uuid, error_msg)
                 await task._update_task_status(task_uuid, TaskStatus.FAILED, error_message=error_msg)
                 return {"error": error_msg}
-        
-        # Create agent instance
-        agent_instance = SimpleAgent(
-            agent_id=agent_uuid,
-            task_id=task_uuid,
-            name=agent.name,
-            model_name=agent.model_name,
-            config=agent.config,
-            ollama_client=ollama_client,
-            log_service=log_service
-        )
+
+        # Determine agent type and create appropriate instance
+        if agent.agent_type_id is not None:
+            # Dynamic agent
+            logger.info(f"Processing task for dynamic agent: {agent_id}")
+            agent_instance = await _create_dynamic_agent_instance(
+                agent, agent_uuid, task_uuid, session
+            )
+        else:
+            # Static agent (legacy)
+            logger.info(f"Processing task for static agent: {agent_id}")
+            agent_instance = SimpleAgent(
+                agent_id=agent_uuid,
+                task_id=task_uuid,
+                name=agent.name,
+                model_name=agent.model_name,
+                config=agent.config or {},
+                ollama_client=ollama_client,
+                log_service=log_service
+            )
         
         # Process the task with metrics
         with Timer(
@@ -273,3 +288,44 @@ async def _cleanup_old_logs_async(days: int) -> Dict[str, Any]:
             "status": "failed",
             "error": str(e)
         }
+
+
+async def _create_dynamic_agent_instance(agent, agent_uuid, task_uuid, session):
+    """Create a dynamic agent instance for task processing."""
+    try:
+        # Initialize services
+        schema_manager = SchemaManager(session)
+        tool_registry = ToolRegistry()
+        security_service = SecurityService()
+
+        # Get agent type schema by querying directly
+        query = select(AgentType).where(AgentType.id == agent.agent_type_id)
+        result = await session.execute(query)
+        agent_type_obj = result.scalar_one_or_none()
+
+        if not agent_type_obj:
+            raise ValueError(f"Agent type {agent.agent_type_id} not found")
+
+        # Create agent factory and build the agent
+        agent_factory = AgentFactory(
+            db_session=session,
+            schema_manager=schema_manager,
+            tool_registry=tool_registry,
+            ollama_client=ollama_client,
+            log_service=log_service
+        )
+
+        # Create dynamic agent instance
+        dynamic_agent = await agent_factory.create_agent(
+            agent_id=agent_uuid,
+            task_id=task_uuid,
+            agent_type=agent_type_obj.type_name,
+            name=agent.name,
+            config=agent.config or {}
+        )
+
+        return dynamic_agent
+
+    except Exception as e:
+        logger.error(f"Failed to create dynamic agent instance: {e}")
+        raise
