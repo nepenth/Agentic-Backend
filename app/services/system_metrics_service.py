@@ -39,9 +39,13 @@ class SystemMetricsService:
 
             # Get CPU frequency
             cpu_freq = psutil.cpu_freq()
-            current_freq = cpu_freq.current if cpu_freq else None
-            min_freq = cpu_freq.min if cpu_freq else None
-            max_freq = cpu_freq.max if cpu_freq else None
+            current_freq = cpu_freq.current if cpu_freq and cpu_freq.current else None
+            min_freq = cpu_freq.min if cpu_freq and cpu_freq.min else None
+            max_freq = cpu_freq.max if cpu_freq and cpu_freq.max else None
+
+            # Handle case where current frequency is very low (container issue)
+            if current_freq and current_freq < 100:  # Less than 100 MHz is likely incorrect
+                current_freq = None
 
             # Get CPU times
             cpu_times = psutil.cpu_times_percent(interval=0.1)
@@ -50,12 +54,22 @@ class SystemMetricsService:
             cpu_count = psutil.cpu_count()
             cpu_count_logical = psutil.cpu_count(logical=True)
 
+            # Calculate GHz values (handle None values)
+            current_ghz = round(current_freq / 1000, 1) if current_freq and current_freq >= 100 else None
+            min_ghz = round(min_freq / 1000, 1) if min_freq else None
+            max_ghz = round(max_freq / 1000, 1) if max_freq else None
+
             return {
                 "usage_percent": round(cpu_percent, 2),
+                "frequency_ghz": {
+                    "current": current_ghz,
+                    "min": min_ghz,
+                    "max": max_ghz
+                },
                 "frequency_mhz": {
-                    "current": round(current_freq, 2) if current_freq else None,
-                    "min": round(min_freq, 2) if min_freq else None,
-                    "max": round(max_freq, 2) if max_freq else None
+                    "current": round(current_freq, 0) if current_freq and current_freq >= 100 else None,
+                    "min": round(min_freq, 0) if min_freq else None,
+                    "max": round(max_freq, 0) if max_freq else None
                 },
                 "times_percent": {
                     "user": round(cpu_times.user, 2),
