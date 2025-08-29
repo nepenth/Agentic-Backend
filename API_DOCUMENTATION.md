@@ -47,6 +47,45 @@ If you set an `API_KEY` in your .env file:
 3. Click **"Execute"**
 4. You should see a 200 response with system status
 
+### ✅ Current API Status (All Endpoints Working)
+
+**Recently Fixed Issues:**
+- ✅ **Security Routes**: Fixed double prefix issue (`/api/v1/security/security/...` → `/api/v1/security/...`)
+- ✅ **Database Schema**: Added missing columns (`agent_type_id`, `dynamic_config`, `documentation_url`)
+- ✅ **WebSocket Support**: Fully configured and documented
+- ✅ **Agent Endpoints**: All CRUD operations working
+- ✅ **System Metrics**: CPU, memory, GPU monitoring active
+- ✅ **Ollama Integration**: Model management and health checks working
+
+**Verified Working Endpoints:**
+```bash
+# Core endpoints
+GET  /api/v1/health                    # ✅ System health
+GET  /api/v1/agents                    # ✅ List agents
+POST /api/v1/agents/create             # ✅ Create agent
+GET  /api/v1/tasks                     # ✅ List tasks
+POST /api/v1/tasks/run                 # ✅ Execute task
+
+# Security endpoints
+GET  /api/v1/security/status           # ✅ Security status (admin required)
+POST /api/v1/security/status           # ✅ Update security config (admin required)
+GET  /api/v1/security/health           # ✅ Security health (public)
+POST /api/v1/security/validate-tool-execution # ✅ Pre-validate tool executions (authenticated)
+
+# System monitoring
+GET  /api/v1/system/metrics            # ✅ All system metrics
+GET  /api/v1/system/metrics/cpu        # ✅ CPU metrics
+GET  /api/v1/system/metrics/gpu        # ✅ GPU metrics
+
+# Ollama integration
+GET  /api/v1/ollama/models             # ✅ Available models
+GET  /api/v1/ollama/health             # ✅ Ollama health
+
+# WebSocket endpoints
+WS   /ws/logs                          # ✅ Real-time logs
+WS   /ws/tasks/{task_id}               # ✅ Task monitoring
+```
+
 ## 📋 Complete API Reference
 
 ### 🔒 Security Endpoints
@@ -54,8 +93,9 @@ If you set an `API_KEY` in your .env file:
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | `GET` | `/api/v1/security/status` | Current security status and metrics | ✅ |
+| `POST` | `/api/v1/security/status` | Update security status and configuration | ✅ |
 | `GET` | `/api/v1/security/agents/{agent_id}/report` | Agent-specific security reports | ✅ |
-| `POST` | `/api/v1/security/validate-tool-execution` | Pre-validate tool executions | ❌ |
+| `POST` | `/api/v1/security/validate-tool-execution` | Pre-validate tool executions | ✅ |
 | `GET` | `/api/v1/security/incidents` | Security incident management with filtering | ✅ |
 | `POST` | `/api/v1/security/incidents/{incident_id}/resolve` | Resolve security incidents | ✅ |
 | `GET` | `/api/v1/security/limits` | Current security limits and constraints | ✅ |
@@ -567,10 +607,226 @@ curl http://localhost:8000/api/v1/security/incidents?severity=low
 
 ### 🌐 WebSocket Endpoints
 
-| Endpoint | Description | Parameters |
-|----------|-------------|------------|
-| `/ws/logs` | Real-time log streaming | `agent_id`, `task_id`, `level` |
-| `/ws/tasks/{task_id}` | Task-specific updates | - |
+WebSocket connections provide real-time communication for monitoring agent activities, task progress, and system events.
+
+#### Connection URLs
+- **Development**: `ws://localhost:8000/ws/...`
+- **Production**: `wss://whyland-ai.nakedsun.xyz/ws/...`
+
+#### ⚠️ Socket.IO vs Raw WebSockets
+
+**IMPORTANT:** Our backend uses **raw WebSockets** (FastAPI), NOT Socket.IO!
+
+❌ **Wrong (Socket.IO):**
+```javascript
+import io from 'socket.io-client';
+const socket = io('wss://whyland-ai.nakedsun.xyz'); // Uses /socket.io/ path
+```
+
+✅ **Correct (Raw WebSocket):**
+```javascript
+const ws = new WebSocket('wss://whyland-ai.nakedsun.xyz/ws/logs');
+```
+
+#### Available Endpoints
+
+| Endpoint | Description | Parameters | Message Types |
+|----------|-------------|------------|---------------|
+| `/ws/logs` | Real-time log streaming | `agent_id`, `task_id`, `level` | `log_entry`, `task_update` |
+| `/ws/tasks/{task_id}` | Task-specific updates | - | `task_status`, `task_progress`, `task_complete` |
+
+#### WebSocket Message Format
+
+**Log Entry Message:**
+```json
+{
+  "type": "log_entry",
+  "data": {
+    "timestamp": "2024-01-01T12:00:00Z",
+    "level": "info",
+    "message": "Task processing started",
+    "agent_id": "agent-uuid",
+    "task_id": "task-uuid",
+    "source": "pipeline"
+  }
+}
+```
+
+**Task Status Message:**
+```json
+{
+  "type": "task_status",
+  "data": {
+    "task_id": "task-uuid",
+    "status": "running",
+    "progress": 45,
+    "message": "Processing step 3 of 5",
+    "timestamp": "2024-01-01T12:00:00Z"
+  }
+}
+```
+
+#### JavaScript Connection Examples
+
+**⚠️ IMPORTANT: Use Raw WebSockets, NOT Socket.IO**
+
+**Basic WebSocket Connection:**
+```javascript
+// Connect to real-time logs
+const wsUrl = window.location.protocol === 'https:'
+  ? 'wss://whyland-ai.nakedsun.xyz/ws/logs'
+  : 'ws://localhost:8000/ws/logs';
+
+const ws = new WebSocket(wsUrl);
+
+ws.onopen = function(event) {
+  console.log('WebSocket connected');
+};
+
+ws.onmessage = function(event) {
+  const message = JSON.parse(event.data);
+  console.log('Received:', message);
+
+  // Handle different message types
+  switch(message.type) {
+    case 'log_entry':
+      updateLogDisplay(message.data);
+      break;
+    case 'task_status':
+      updateTaskProgress(message.data);
+      break;
+    case 'connected':
+      console.log('Connection confirmed:', message.message);
+      break;
+  }
+};
+
+ws.onclose = function(event) {
+  console.log('WebSocket disconnected');
+};
+
+ws.onerror = function(error) {
+  console.error('WebSocket error:', error);
+};
+```
+
+// Monitor a specific task
+const taskId = 'your-task-uuid';
+const taskWsUrl = `wss://whyland-ai.nakedsun.xyz/ws/tasks/${taskId}`;
+const taskWs = new WebSocket(taskWsUrl);
+
+taskWs.onmessage = function(event) {
+  const message = JSON.parse(event.data);
+
+  if (message.type === 'task_complete') {
+    console.log('Task completed:', message.data);
+    taskWs.close();
+  }
+};
+```
+
+**React Hook for WebSocket:**
+```javascript
+import { useEffect, useRef, useState } from 'react';
+
+function useWebSocket(url) {
+  const [messages, setMessages] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const ws = useRef(null);
+
+  useEffect(() => {
+    ws.current = new WebSocket(url);
+
+    ws.current.onopen = () => {
+      setIsConnected(true);
+    };
+
+    ws.current.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      setMessages(prev => [...prev, message]);
+    };
+
+    ws.current.onclose = () => {
+      setIsConnected(false);
+    };
+
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
+  }, [url]);
+
+  return { messages, isConnected };
+}
+
+// Usage in component
+function TaskMonitor({ taskId }) {
+  const wsUrl = `wss://whyland-ai.nakedsun.xyz/ws/tasks/${taskId}`;
+  const { messages, isConnected } = useWebSocket(wsUrl);
+
+  return (
+    <div>
+      <div>Status: {isConnected ? 'Connected' : 'Disconnected'}</div>
+      <div>
+        {messages.map((msg, index) => (
+          <div key={index}>{JSON.stringify(msg)}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+#### Connection Parameters
+
+**Log Streaming Parameters:**
+- `agent_id`: Filter logs by specific agent
+- `task_id`: Filter logs by specific task
+- `level`: Filter by log level (`debug`, `info`, `warning`, `error`)
+
+**Example URLs:**
+```
+ws://localhost:8000/ws/logs?agent_id=123&level=info
+wss://whyland-ai.nakedsun.xyz/ws/logs?task_id=456
+ws://localhost:8000/ws/tasks/task-uuid
+```
+
+#### Error Handling
+
+**Connection Errors:**
+```javascript
+ws.onerror = function(error) {
+  console.error('WebSocket connection failed');
+
+  // Implement reconnection logic
+  setTimeout(() => {
+    // Attempt to reconnect
+    connectWebSocket();
+  }, 5000);
+};
+```
+
+**Message Parsing Errors:**
+```javascript
+ws.onmessage = function(event) {
+  try {
+    const message = JSON.parse(event.data);
+    handleMessage(message);
+  } catch (error) {
+    console.error('Failed to parse WebSocket message:', error);
+  }
+};
+```
+
+#### Best Practices
+
+1. **Connection Management**: Always handle connection lifecycle events
+2. **Reconnection Logic**: Implement automatic reconnection on disconnection
+3. **Message Filtering**: Use query parameters to reduce message volume
+4. **Error Handling**: Gracefully handle parsing and connection errors
+5. **Resource Cleanup**: Close connections when components unmount
+6. **Security**: Use WSS in production environments
 
 ## 📖 Dynamic Agent Documentation System
 
@@ -1208,15 +1464,27 @@ http POST localhost:8000/api/v1/agents/create Authorization:"Bearer api-key" nam
 
 ## 🎉 Next Steps
 
-1. **Explore Swagger UI**: http://localhost:8000/docs
+### ✅ All Systems Operational
+1. **Explore Swagger UI**: http://localhost:8000/docs (All endpoints working)
 2. **Monitor System Performance**: Check `/api/v1/system/metrics` for hardware utilization
 3. **Browse Available Models**: Use `/api/v1/ollama/models` to see available Ollama models
-4. **Read Agent Documentation**: http://localhost:8000/api/v1/docs/agent-creation
-5. **Test basic workflows**: Create agent → Run task → Check logs
-6. **Try WebSocket connections** for real-time updates
-7. **Monitor with Flower**: http://localhost:5555
-8. **Check database**: http://localhost:8080
-9. **Generate Agent-Specific Docs**: Use `/api/v1/agent-types/{type}/documentation`
+4. **Test WebSocket connections** for real-time updates (fully documented)
+
+### 🚀 Start Building Workflows
+5. **Read Workflow Development Guide**: See `WORKFLOW_DEVELOPMENT_GUIDE.md`
+6. **Try Email Processing Example**: Complete implementation with frontend dashboard
+7. **Create Custom Agents**: Use the documented patterns and examples
+8. **Build Frontend Dashboards**: Use React components and WebSocket integration
+
+### 🔧 Development Tools
+9. **Monitor with Flower**: http://localhost:5555 (Celery task monitoring)
+10. **Check database**: http://localhost:8080 (Adminer database browser)
+11. **Generate Agent-Specific Docs**: Use `/api/v1/agent-types/{type}/documentation`
+
+### 📚 Learning Resources
+12. **Agent Creation Guide**: http://localhost:8000/api/v1/docs/agent-creation
+13. **Frontend Integration**: http://localhost:8000/api/v1/docs/frontend-integration
+14. **Example Configurations**: http://localhost:8000/api/v1/docs/examples
 
 The API is now ready for integration with your applications! 🚀
 
@@ -1229,3 +1497,32 @@ The comprehensive documentation system is now available to help you:
 - **Follow best practices** for development and deployment
 
 **Start exploring**: http://localhost:8000/api/v1/docs/agent-creation
+
+### 🚀 Workflow Development Guide
+
+A comprehensive **WORKFLOW_DEVELOPMENT_GUIDE.md** is now available with:
+
+#### 📧 Email Processing Workflow Example
+- **Complete implementation** of IMAP email processing agent
+- **LLM integration** for email analysis and prioritization
+- **Task management** system for follow-ups
+- **Frontend dashboard** with React components
+- **Database schema** for workflow data
+
+#### 🛠️ Development Resources
+- **Agent creation patterns** and best practices
+- **Tool development** for custom integrations
+- **Frontend integration** examples and hooks
+- **WebSocket usage** for real-time updates
+- **Security considerations** for agent workflows
+
+#### 📁 Example Files Included
+```
+examples/
+├── email_analyzer_agent.json      # Agent configuration
+├── EmailWorkflowDashboard.jsx     # React dashboard component
+├── EmailWorkflowDashboard.css     # Component styling
+└── README.md                      # Implementation guide
+```
+
+**Read the guide**: See `WORKFLOW_DEVELOPMENT_GUIDE.md` for complete workflow development instructions!

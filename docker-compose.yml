@@ -35,8 +35,11 @@ services:
   api:
     build: .
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     expose:
       - "8000"
+    runtime: nvidia
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:secret@db:5432/ai_db
       - REDIS_URL=redis://redis:6379/0
@@ -46,18 +49,22 @@ services:
       - SECRET_KEY=your-secret-key-change-in-production
       - LOG_LEVEL=INFO
       - DEBUG=true
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
+      - .:/app
       - ./logs:/app/logs
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:
     build: .
     restart: unless-stopped
+    runtime: nvidia
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:secret@db:5432/ai_db
       - REDIS_URL=redis://redis:6379/0
@@ -66,6 +73,8 @@ services:
       - OLLAMA_BASE_URL=http://whyland-ai.nakedsun.xyz:11434
       - SECRET_KEY=your-secret-key-change-in-production
       - LOG_LEVEL=INFO
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     depends_on:
       db:
         condition: service_healthy
@@ -74,6 +83,8 @@ services:
     volumes:
       - ./logs:/app/logs
     command: celery -A app.celery_app worker --loglevel=info --concurrency=4
+    healthcheck:
+      disable: true
 
   flower:
     build: .
@@ -86,6 +97,8 @@ services:
     depends_on:
       - redis
     command: celery -A app.celery_app flower --port=5555
+    healthcheck:
+      disable: true
 
   nginx:
     image: nginx:alpine
@@ -100,7 +113,7 @@ services:
       - api
       - flower
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      test: ["CMD", "curl", "-f", "-k", "https://127.0.0.1/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

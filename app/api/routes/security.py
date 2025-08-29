@@ -6,13 +6,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db_session, get_current_user
-from app.api.security_middleware import validate_tool_execution, get_security_status, get_agent_security_report
-from app.services.security_service import SecurityService
 from app.db.models.user import User
 from app.utils.logging import get_logger
 
 logger = get_logger("security_routes")
-router = APIRouter(prefix="/security", tags=["security"])
+router = APIRouter(tags=["security"])
+
+
+def get_security_service():
+    """Lazy import to avoid circular imports."""
+    from app.services.security_service import SecurityService, SecurityLevel
+    return SecurityService()
+
+
+def get_security_middleware_functions():
+    """Lazy import to avoid circular imports."""
+    from app.api.security_middleware import validate_tool_execution, get_security_status, get_agent_security_report
+    return validate_tool_execution, get_security_status, get_agent_security_report
 
 
 @router.get("/status")
@@ -28,12 +38,54 @@ async def get_security_status_endpoint(
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
+        validate_tool_execution, get_security_status, get_agent_security_report = get_security_middleware_functions()
         status = await get_security_status(security_service)
         return status
     except Exception as e:
         logger.error(f"Failed to get security status: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve security status")
+
+
+@router.post("/status")
+async def update_security_status_endpoint(
+    status_update: dict,
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """
+    Update security status and configuration.
+
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    try:
+        security_service = get_security_service()
+
+        # Update security level if provided
+        if "security_level" in status_update:
+            new_level = status_update["security_level"]
+            if new_level in ["strict", "moderate", "lenient"]:
+                security_service.security_level = SecurityLevel(new_level)
+                logger.info(f"Security level updated to {new_level} by {current_user.username}")
+
+        # Update limits if provided
+        if "limits" in status_update:
+            limits_update = status_update["limits"]
+            for key, value in limits_update.items():
+                if hasattr(security_service.limits, key):
+                    setattr(security_service.limits, key, value)
+                    logger.info(f"Security limit {key} updated to {value} by {current_user.username}")
+
+        return {
+            "message": "Security status updated successfully",
+            "updated_fields": list(status_update.keys()),
+            "timestamp": "2024-01-01T00:00:00Z"
+        }
+    except Exception as e:
+        logger.error(f"Failed to update security status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update security status")
 
 
 @router.get("/agents/{agent_id}/report")
@@ -51,7 +103,8 @@ async def get_agent_security_report_endpoint(
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
+        validate_tool_execution, get_security_status, get_agent_security_report = get_security_middleware_functions()
         report = await get_agent_security_report(security_service, agent_id)
 
         if not report:
@@ -78,7 +131,8 @@ async def validate_tool_execution_endpoint(
     This endpoint can be used to pre-validate tool executions before they occur.
     """
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
+        validate_tool_execution, get_security_status, get_agent_security_report = get_security_middleware_functions()
         result = await validate_tool_execution(security_service, agent_id, tool_name, input_data)
         return result
     except HTTPException:
@@ -105,7 +159,7 @@ async def get_security_incidents(
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
 
         # Filter incidents based on criteria
         incidents = security_service.security_incidents
@@ -159,7 +213,7 @@ async def resolve_security_incident(
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
 
         # Find and resolve the incident
         incident_found = False
@@ -196,7 +250,7 @@ async def get_security_limits(
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
         limits = security_service.limits
 
         return {
@@ -246,7 +300,7 @@ async def security_health_check() -> dict:
     This endpoint is publicly accessible for monitoring purposes.
     """
     try:
-        security_service = SecurityService()
+        security_service = get_security_service()
 
         # Basic health checks
         incidents_count = len(security_service.security_incidents)

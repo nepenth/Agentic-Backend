@@ -20,10 +20,15 @@ from app.schemas.agent_schema import (
     FieldType
 )
 from app.db.models.agent_type import AgentType, DynamicTable, RegisteredTool
-from app.services.security_service import SecurityService
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def get_security_service():
+    """Lazy import to avoid circular imports."""
+    from app.services.security_service import SecurityService
+    return SecurityService()
 
 
 class SchemaValidationError(Exception):
@@ -44,10 +49,10 @@ class IncompatibleSchemaError(Exception):
 class SchemaManager:
     """Manages dynamic agent schemas, validation, and versioning."""
 
-    def __init__(self, db_session: AsyncSession, security_service: Optional[SecurityService] = None):
+    def __init__(self, db_session: AsyncSession, security_service=None):
         self.db = db_session
         self._meta_schema = self._load_meta_schema()
-        self.security_service = security_service or SecurityService()
+        self.security_service = security_service or get_security_service()
     
     def _load_meta_schema(self) -> Dict[str, Any]:
         """Load the meta-schema that defines valid agent schema structure."""
