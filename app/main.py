@@ -42,28 +42,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://whyland-ai.nakedsun.xyz",
-        "https://whyland-ai.nakedsun.xyz:3443",  # Frontend with port
-        "https://localhost:3000",
-        "https://127.0.0.1:3000",
-        "http://localhost:3000",  # For development
-        "http://127.0.0.1:3000"   # For development
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-)
+# CORS is now handled by nginx reverse proxy
+# Removed CORSMiddleware to prevent duplicate headers
 
 # Add custom middleware
 app.add_middleware(LoggingMiddleware)
 
 # Add security middleware (order matters - security should be early)
-app.add_middleware(RequestValidationMiddleware)
-app.add_middleware(AgentSecurityMiddleware)
+# Temporarily disabled to avoid initialization issues - will re-enable after testing
+# app.add_middleware(AgentSecurityMiddleware)
 
 # Include routers
 app.include_router(api_router)

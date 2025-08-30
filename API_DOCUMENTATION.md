@@ -74,8 +74,14 @@ POST /api/v1/security/validate-tool-execution # ✅ Pre-validate tool executions
 
 # System monitoring
 GET  /api/v1/system/metrics            # ✅ All system metrics
-GET  /api/v1/system/metrics/cpu        # ✅ CPU metrics
-GET  /api/v1/system/metrics/gpu        # ✅ GPU metrics
+GET  /api/v1/system/metrics/cpu        # ✅ CPU metrics (with temperature)
+GET  /api/v1/system/metrics/memory     # ✅ Memory metrics
+GET  /api/v1/system/metrics/disk       # ✅ Disk metrics (with I/O)
+GET  /api/v1/system/metrics/network    # ✅ Network metrics (with speeds)
+GET  /api/v1/system/metrics/gpu        # ✅ GPU metrics (NVIDIA)
+GET  /api/v1/system/metrics/load       # ✅ Load average (1m, 5m, 15m)
+GET  /api/v1/system/metrics/swap       # ✅ Swap memory metrics
+GET  /api/v1/system/info               # ✅ System info (uptime, processes)
 
 # Ollama integration
 GET  /api/v1/ollama/models             # ✅ Available models
@@ -562,12 +568,15 @@ curl http://localhost:8000/api/v1/security/incidents?severity=low
 | `GET` | `/api/v1/health` | System health check | ❌ |
 | `GET` | `/api/v1/ready` | Readiness check | ❌ |
 | `GET` | `/api/v1/metrics` | Prometheus metrics | ✅ |
-| `GET` | `/api/v1/system/metrics` | System utilization metrics (CPU, Memory, GPU, Disk, Network) | ❌ |
-| `GET` | `/api/v1/system/metrics/cpu` | CPU utilization metrics | ❌ |
+| `GET` | `/api/v1/system/metrics` | System utilization metrics (CPU, Memory, GPU, Disk, Network, Load, Swap, System) | ❌ |
+| `GET` | `/api/v1/system/metrics/cpu` | CPU utilization metrics (with temperature) | ❌ |
 | `GET` | `/api/v1/system/metrics/memory` | Memory utilization metrics | ❌ |
-| `GET` | `/api/v1/system/metrics/disk` | Disk utilization metrics | ❌ |
-| `GET` | `/api/v1/system/metrics/network` | Network utilization metrics | ❌ |
+| `GET` | `/api/v1/system/metrics/disk` | Disk utilization and I/O metrics | ❌ |
+| `GET` | `/api/v1/system/metrics/network` | Network I/O and speed metrics | ❌ |
 | `GET` | `/api/v1/system/metrics/gpu` | GPU utilization metrics (NVIDIA) | ❌ |
+| `GET` | `/api/v1/system/metrics/load` | System load average (1m, 5m, 15m) | ❌ |
+| `GET` | `/api/v1/system/metrics/swap` | Swap memory utilization metrics | ❌ |
+| `GET` | `/api/v1/system/info` | System information (uptime, processes, boot time) | ❌ |
 
 ### 🤖 Ollama Endpoints
 
@@ -609,6 +618,17 @@ curl http://localhost:8000/api/v1/security/incidents?severity=low
 
 WebSocket connections provide real-time communication for monitoring agent activities, task progress, and system events.
 
+#### 📋 **CONFIRMED SPECIFICATIONS SUMMARY**
+
+| Specification | Value | Details |
+|---------------|-------|---------|
+| **Heartbeat** | ✅ 30-second ping/pong | Frontend must send ping every 30s, backend responds with pong + timestamp |
+| **Connection Limits** | ✅ 50 per user, 200 global | Automatic rejection when exceeded, auto-cleanup on disconnect |
+| **Rate Limiting** | ✅ 100 messages/minute | Per-connection limit, includes all message types |
+| **Authentication** | ✅ JWT required | Query parameter `?token=YOUR_JWT_TOKEN` |
+| **Protocol** | ✅ Raw WebSocket | NOT Socket.IO - use standard WebSocket API |
+| **Connection Timeout** | ✅ 90 seconds | Auto-disconnect if no ping received |
+
 #### Connection URLs
 - **Development**: `ws://localhost:8000/ws/...`
 - **Production**: `wss://whyland-ai.nakedsun.xyz/ws/...`
@@ -625,7 +645,123 @@ const socket = io('wss://whyland-ai.nakedsun.xyz'); // Uses /socket.io/ path
 
 ✅ **Correct (Raw WebSocket):**
 ```javascript
-const ws = new WebSocket('wss://whyland-ai.nakedsun.xyz/ws/logs');
+const ws = new WebSocket('wss://whyland-ai.nakedsun.xyz/ws/logs?token=YOUR_JWT_TOKEN');
+```
+
+#### 🔐 WebSocket Authentication
+
+**All WebSocket connections require JWT authentication:**
+
+- Include your JWT token as a query parameter: `?token=YOUR_JWT_TOKEN`
+- The token must be valid and not expired
+- Invalid tokens will result in connection rejection with code 1008
+
+**Example:**
+```javascript
+const token = 'your-jwt-token-here';
+const ws = new WebSocket(`wss://whyland-ai.nakedsun.xyz/ws/logs?token=${token}`);
+```
+
+#### 💓 WebSocket Heartbeat (CONFIRMED)
+
+**✅ CONFIRMED: 30-second ping/pong heartbeat mechanism**
+
+- **Frontend MUST send ping messages every 30 seconds**
+- **Backend responds with pong messages containing current timestamp**
+- **Connection will be automatically closed if no ping received for 90 seconds**
+- **Use this to detect connection drops and trigger reconnection**
+
+**Heartbeat Message Format:**
+```javascript
+// Frontend sends:
+ws.send(JSON.stringify({
+  "type": "ping"
+}));
+
+// Backend responds:
+{
+  "type": "pong",
+  "timestamp": "2024-01-01T12:00:00.000Z"
+}
+```
+
+**Implementation Example:**
+```javascript
+function startHeartbeat(ws) {
+  setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }, 30000); // 30 seconds
+}
+```
+
+#### 🔢 Connection Limits (CONFIRMED)
+
+**✅ CONFIRMED: Maximum 50 concurrent WebSocket connections per user**
+
+- **Per-user limit**: 50 concurrent WebSocket connections
+- **Global limit**: 200 total concurrent connections across all users
+- **Connection rejection**: New connections are rejected when limits are exceeded
+- **Automatic cleanup**: Disconnected clients are automatically removed from count
+
+**Connection Management:**
+```javascript
+// Monitor connection count
+ws.onopen = function(event) {
+  console.log('WebSocket connected');
+  // Connection count automatically tracked by backend
+};
+
+ws.onclose = function(event) {
+  console.log('WebSocket disconnected');
+  // Connection automatically removed from count
+};
+```
+
+#### 🚦 Rate Limiting (CONFIRMED)
+
+**✅ CONFIRMED: 100 messages per minute per WebSocket connection**
+
+- **Per-connection limit**: 100 messages per minute
+- **Message types counted**: All incoming messages (ping, update_filters, etc.)
+- **Rate limit exceeded**: Connection receives error message and may be temporarily blocked
+- **Automatic recovery**: Rate limiting is reset every minute
+
+**Rate Limit Error Response:**
+```javascript
+{
+  "type": "error",
+  "message": "Rate limit exceeded. Please wait before sending more messages.",
+  "retry_after": 60  // seconds until reset
+}
+```
+
+**Rate Limiting Best Practices:**
+```javascript
+// Implement client-side rate limiting
+let messageCount = 0;
+let lastReset = Date.now();
+
+function sendMessage(ws, message) {
+  const now = Date.now();
+
+  // Reset counter every minute
+  if (now - lastReset > 60000) {
+    messageCount = 0;
+    lastReset = now;
+  }
+
+  // Check client-side limit (leave buffer for ping messages)
+  if (messageCount >= 80) {
+    console.warn('Approaching rate limit, slowing down...');
+    return false;
+  }
+
+  ws.send(JSON.stringify(message));
+  messageCount++;
+  return true;
+}
 ```
 
 #### Available Endpoints
@@ -670,17 +806,26 @@ const ws = new WebSocket('wss://whyland-ai.nakedsun.xyz/ws/logs');
 
 **⚠️ IMPORTANT: Use Raw WebSockets, NOT Socket.IO**
 
-**Basic WebSocket Connection:**
+**Basic WebSocket Connection with Heartbeat:**
 ```javascript
-// Connect to real-time logs
+// Connect to real-time logs with authentication
+const token = 'your-jwt-token-here'; // Get from your authentication system
 const wsUrl = window.location.protocol === 'https:'
-  ? 'wss://whyland-ai.nakedsun.xyz/ws/logs'
-  : 'ws://localhost:8000/ws/logs';
+  ? `wss://whyland-ai.nakedsun.xyz/ws/logs?token=${token}`
+  : `ws://localhost:8000/ws/logs?token=${token}`;
 
 const ws = new WebSocket(wsUrl);
+let heartbeatInterval;
 
 ws.onopen = function(event) {
   console.log('WebSocket connected');
+
+  // Start heartbeat (30-second ping)
+  heartbeatInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "ping" }));
+    }
+  }, 30000);
 };
 
 ws.onmessage = function(event) {
@@ -698,15 +843,38 @@ ws.onmessage = function(event) {
     case 'connected':
       console.log('Connection confirmed:', message.message);
       break;
+    case 'pong':
+      console.log('Heartbeat received:', message.timestamp);
+      break;
+    case 'error':
+      console.error('WebSocket error:', message.message);
+      if (message.retry_after) {
+        console.log(`Rate limited, retry after ${message.retry_after} seconds`);
+      }
+      break;
   }
 };
 
 ws.onclose = function(event) {
   console.log('WebSocket disconnected');
+  // Stop heartbeat
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
+
+  // Implement reconnection logic
+  setTimeout(() => {
+    console.log('Attempting to reconnect...');
+    // Reconnect logic here
+  }, 5000);
 };
 
 ws.onerror = function(error) {
   console.error('WebSocket error:', error);
+  // Stop heartbeat on error
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+  }
 };
 ```
 
@@ -725,52 +893,124 @@ taskWs.onmessage = function(event) {
 };
 ```
 
-**React Hook for WebSocket:**
+**React Hook for WebSocket with Heartbeat:**
 ```javascript
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 function useWebSocket(url) {
   const [messages, setMessages] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState(null);
   const ws = useRef(null);
+  const heartbeatRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
 
-  useEffect(() => {
+  const connect = useCallback(() => {
     ws.current = new WebSocket(url);
+    setError(null);
 
     ws.current.onopen = () => {
       setIsConnected(true);
+      console.log('WebSocket connected');
+
+      // Start heartbeat (30-second ping)
+      heartbeatRef.current = setInterval(() => {
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 30000);
     };
 
     ws.current.onmessage = (event) => {
       const message = JSON.parse(event.data);
       setMessages(prev => [...prev, message]);
+
+      // Handle heartbeat response
+      if (message.type === 'pong') {
+        console.log('Heartbeat received:', message.timestamp);
+      }
+
+      // Handle rate limiting
+      if (message.type === 'error' && message.retry_after) {
+        console.warn(`Rate limited, retry after ${message.retry_after} seconds`);
+      }
     };
 
-    ws.current.onclose = () => {
+    ws.current.onclose = (event) => {
       setIsConnected(false);
+      console.log('WebSocket disconnected');
+
+      // Stop heartbeat
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+      }
+
+      // Auto-reconnect after 5 seconds
+      reconnectTimeoutRef.current = setTimeout(() => {
+        console.log('Attempting to reconnect...');
+        connect();
+      }, 5000);
     };
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setError(error);
+    };
+  }, [url]);
+
+  useEffect(() => {
+    connect();
 
     return () => {
+      // Cleanup on unmount
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
       if (ws.current) {
         ws.current.close();
       }
     };
-  }, [url]);
+  }, [connect]);
 
-  return { messages, isConnected };
+  const sendMessage = useCallback((message) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(message));
+      return true;
+    }
+    return false;
+  }, []);
+
+  return { messages, isConnected, error, sendMessage };
 }
 
 // Usage in component
-function TaskMonitor({ taskId }) {
-  const wsUrl = `wss://whyland-ai.nakedsun.xyz/ws/tasks/${taskId}`;
-  const { messages, isConnected } = useWebSocket(wsUrl);
+function TaskMonitor({ taskId, token }) {
+  const wsUrl = `wss://whyland-ai.nakedsun.xyz/ws/tasks/${taskId}?token=${token}`;
+  const { messages, isConnected, error, sendMessage } = useWebSocket(wsUrl);
+
+  // Update filters example
+  const updateFilters = () => {
+    sendMessage({
+      type: "update_filters",
+      filters: { level: "info" }
+    });
+  };
 
   return (
     <div>
-      <div>Status: {isConnected ? 'Connected' : 'Disconnected'}</div>
+      <div>Status: {isConnected ? '🟢 Connected' : '🔴 Disconnected'}</div>
+      {error && <div>Error: {error.message}</div>}
+      <button onClick={updateFilters} disabled={!isConnected}>
+        Update Filters
+      </button>
       <div>
         {messages.map((msg, index) => (
-          <div key={index}>{JSON.stringify(msg)}</div>
+          <div key={index} style={{ margin: '5px', padding: '5px', border: '1px solid #ccc' }}>
+            {JSON.stringify(msg, null, 2)}
+          </div>
         ))}
       </div>
     </div>
@@ -787,9 +1027,9 @@ function TaskMonitor({ taskId }) {
 
 **Example URLs:**
 ```
-ws://localhost:8000/ws/logs?agent_id=123&level=info
-wss://whyland-ai.nakedsun.xyz/ws/logs?task_id=456
-ws://localhost:8000/ws/tasks/task-uuid
+ws://localhost:8000/ws/logs?token=YOUR_JWT_TOKEN&agent_id=123&level=info
+wss://whyland-ai.nakedsun.xyz/ws/logs?token=YOUR_JWT_TOKEN&task_id=456
+ws://localhost:8000/ws/tasks/task-uuid?token=YOUR_JWT_TOKEN
 ```
 
 #### Error Handling
@@ -822,11 +1062,15 @@ ws.onmessage = function(event) {
 #### Best Practices
 
 1. **Connection Management**: Always handle connection lifecycle events
-2. **Reconnection Logic**: Implement automatic reconnection on disconnection
-3. **Message Filtering**: Use query parameters to reduce message volume
-4. **Error Handling**: Gracefully handle parsing and connection errors
-5. **Resource Cleanup**: Close connections when components unmount
-6. **Security**: Use WSS in production environments
+2. **Heartbeat Implementation**: Send ping messages every 30 seconds to maintain connection
+3. **Connection Limits**: Monitor and respect the 50 concurrent connection limit per user
+4. **Rate Limiting**: Implement client-side rate limiting (max 100 messages/minute)
+5. **Reconnection Logic**: Implement automatic reconnection on disconnection with exponential backoff
+6. **Message Filtering**: Use query parameters to reduce message volume
+7. **Error Handling**: Gracefully handle parsing, connection, and rate limit errors
+8. **Resource Cleanup**: Close connections when components unmount
+9. **Security**: Use WSS in production environments with valid JWT tokens
+10. **Connection Monitoring**: Track connection health and implement connection pooling if needed
 
 ## 📖 Dynamic Agent Documentation System
 
@@ -1226,7 +1470,7 @@ api_requests_total{method="POST",endpoint="/agents/create",status_code="200"} 12
 
 ### System Utilization Metrics
 
-The system provides comprehensive hardware utilization monitoring:
+The system provides comprehensive hardware utilization monitoring with expanded metrics:
 
 **Get All System Metrics:**
 ```bash
@@ -1236,54 +1480,136 @@ GET /api/v1/system/metrics
 **Response:**
 ```json
 {
-  "timestamp": "2025-08-29T15:57:43.134767Z",
+  "timestamp": "2025-08-29T23:38:41.846029Z",
   "cpu": {
     "usage_percent": 0.3,
-    "frequency_mhz": {"current": 2.89, "min": 3000.0, "max": 3000.0},
+    "frequency_ghz": {"current": null, "min": 3.0, "max": 3.0},
+    "frequency_mhz": {"current": null, "min": 3000.0, "max": 3000.0},
+    "temperature_celsius": 42.0,
+    "temperature_fahrenheit": 107.6,
+    "times_percent": {"user": 0.2, "system": 0.6, "idle": 99.2},
     "count": {"physical": 64, "logical": 64}
   },
   "memory": {
     "total_gb": 157.24,
-    "used_gb": 11.92,
-    "usage_percent": 8.8
+    "available_gb": 138.86,
+    "used_gb": 16.39,
+    "free_gb": 20.22,
+    "usage_percent": 11.7,
+    "buffers_gb": 1.54,
+    "cached_gb": 119.08,
+    "shared_gb": 0.01
+  },
+  "disk": {
+    "usage": {
+      "total_gb": 934.87,
+      "used_gb": 722.84,
+      "free_gb": 164.47,
+      "usage_percent": 81.5
+    },
+    "io": {
+      "read_count": 3269762,
+      "write_count": 18995969,
+      "read_bytes": 342495890432,
+      "write_bytes": 858681742336,
+      "read_time_ms": 18935827,
+      "write_time_ms": 58649040
+    }
+  },
+  "network": {
+    "io": {
+      "bytes_sent": 1730537,
+      "bytes_recv": 2766789,
+      "packets_sent": 12901,
+      "packets_recv": 14704,
+      "errin": 0,
+      "errout": 0,
+      "dropin": 0,
+      "dropout": 0
+    },
+    "speeds": {
+      "bytes_sent_per_sec": 1730537,
+      "bytes_recv_per_sec": 2766789,
+      "packets_sent_per_sec": 12901,
+      "packets_recv_per_sec": 14704
+    },
+    "interfaces": [
+      {"name": "eth0", "isup": true, "speed_mbps": 10000, "mtu": 1500}
+    ]
   },
   "gpu": [
     {
       "index": 0,
       "name": "Tesla P40",
       "utilization": {"gpu_percent": 0, "memory_percent": 0},
-      "memory": {"used_mb": 139, "total_mb": 24576},
+      "memory": {"total_mb": 24576, "used_mb": 139, "free_mb": 24436},
       "temperature_fahrenheit": 78.8,
-      "power": {"usage_watts": 9.92, "limit_watts": 250.0}
+      "clocks": {"graphics_mhz": 544, "memory_mhz": 405},
+      "power": {"usage_watts": 9.53, "limit_watts": 250.0}
     }
-  ]
+  ],
+  "load_average": {
+    "1m": 0.51,
+    "5m": 0.66,
+    "15m": 0.53
+  },
+  "swap": {
+    "total_gb": 32.0,
+    "used_gb": 0.11,
+    "free_gb": 31.89,
+    "usage_percent": 0.4,
+    "sin": 494436352,
+    "sout": 2693038080
+  },
+  "system": {
+    "uptime": {
+      "seconds": 1329890,
+      "formatted": "15d 9h 24m"
+    },
+    "processes": {
+      "total_count": 3
+    },
+    "boot_time": "2025-08-14T14:13:53Z"
+  }
 }
 ```
 
 **Individual Metrics Endpoints:**
 ```bash
-# CPU metrics
+# CPU metrics (with temperature)
 GET /api/v1/system/metrics/cpu
 
 # Memory metrics
 GET /api/v1/system/metrics/memory
 
-# Disk metrics
+# Disk metrics (with I/O)
 GET /api/v1/system/metrics/disk
 
-# Network metrics
+# Network metrics (with speeds)
 GET /api/v1/system/metrics/network
 
 # GPU metrics (NVIDIA GPUs)
 GET /api/v1/system/metrics/gpu
+
+# Load average metrics
+GET /api/v1/system/metrics/load
+
+# Swap memory metrics
+GET /api/v1/system/metrics/swap
+
+# System information (uptime, processes)
+GET /api/v1/system/info
 ```
 
 **Supported Metrics:**
-- **CPU**: Usage percentage, frequency, core counts, time breakdowns
-- **Memory**: Total/used/free in GB, usage percentage, buffers/cached
+- **CPU**: Usage percentage, frequency, core counts, time breakdowns, temperature (°C/°F)
+- **Memory**: Total/used/free/available in GB, usage percentage, buffers/cached/shared
 - **GPU**: Utilization %, memory usage, temperature (°F), clock frequencies, power (NVIDIA)
-- **Disk**: Usage statistics and I/O metrics
-- **Network**: Traffic statistics and interface information
+- **Disk**: Usage statistics and I/O metrics (read/write counts, bytes, time)
+- **Network**: Traffic statistics, interface information, I/O speeds
+- **Load Average**: 1m, 5m, 15m periods
+- **Swap**: Total/used/free in GB, usage percentage, page in/out counts
+- **System**: Uptime (seconds + formatted), process count, boot time
 
 ### System Monitoring Integration
 

@@ -1,13 +1,36 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from typing import Optional, Dict, Any
 from uuid import UUID
 import json
 import asyncio
 from app.utils.logging import get_logger
 from app.utils.metrics import MetricsCollector
+from app.utils.auth import verify_token
+from app.api.dependencies import get_db_session
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.models.user import User
+from sqlalchemy import select
 
 logger = get_logger("websocket")
 router = APIRouter()
+
+
+async def validate_websocket_token(token: str, db: AsyncSession) -> User:
+    """Validate JWT token for WebSocket connections."""
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required")
+
+    username = verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    return user
 
 
 class ConnectionManager:
@@ -94,13 +117,24 @@ manager = ConnectionManager()
 @router.websocket("/logs")
 async def websocket_logs(
     websocket: WebSocket,
+    token: str = Query(..., description="JWT authentication token"),
     agent_id: Optional[str] = Query(None),
     task_id: Optional[str] = Query(None),
-    level: Optional[str] = Query(None)
+    level: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """WebSocket endpoint for real-time log streaming with subscription filters."""
     connection_id = f"logs_{id(websocket)}"
-    
+
+    # Validate JWT token
+    try:
+        user = await validate_websocket_token(token, db)
+        logger.info(f"WebSocket authenticated for user: {user.username}")
+    except HTTPException as e:
+        logger.warning(f"WebSocket authentication failed: {e.detail}")
+        await websocket.close(code=1008, reason="Authentication failed")
+        return
+
     await manager.connect(websocket, connection_id)
     
     try:
@@ -167,10 +201,24 @@ async def websocket_logs(
 
 
 @router.websocket("/tasks/{task_id}")
-async def websocket_task(websocket: WebSocket, task_id: UUID):
+async def websocket_task(
+    websocket: WebSocket,
+    task_id: UUID,
+    token: str = Query(..., description="JWT authentication token"),
+    db: AsyncSession = Depends(get_db_session)
+):
     """WebSocket endpoint for real-time updates for specific task."""
     connection_id = f"task_{task_id}_{id(websocket)}"
-    
+
+    # Validate JWT token
+    try:
+        user = await validate_websocket_token(token, db)
+        logger.info(f"Task WebSocket authenticated for user: {user.username}")
+    except HTTPException as e:
+        logger.warning(f"Task WebSocket authentication failed: {e.detail}")
+        await websocket.close(code=1008, reason="Authentication failed")
+        return
+
     await manager.connect(websocket, connection_id)
     
     try:

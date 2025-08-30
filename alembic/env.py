@@ -14,8 +14,9 @@ from app.config import settings
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the database URL from settings
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+# Set the database URL from settings (use sync URL for alembic)
+sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
+config.set_main_option("sqlalchemy.url", sync_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -63,28 +64,26 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
-async def run_async_migrations() -> None:
-    """In this scenario we need to create an Engine
-    and associate a connection with the context.
+def run_sync_migrations() -> None:
+    """Run migrations with sync engine for alembic compatibility."""
 
-    """
+    from sqlalchemy import create_engine
 
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Get the sync URL
+    sync_url = config.get_main_option("sqlalchemy.url")
 
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
+    connectable = create_engine(sync_url, poolclass=pool.NullPool)
 
-    await connectable.dispose()
+    with connectable.connect() as connection:
+        do_run_migrations(connection)
+
+    connectable.dispose()
 
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
 
-    asyncio.run(run_async_migrations())
+    run_sync_migrations()
 
 
 if context.is_offline_mode():
