@@ -96,3 +96,46 @@ async def get_gpu_metrics() -> Dict[str, Any]:
             status_code=500,
             detail=f"Failed to retrieve GPU metrics: {str(e)}"
         )
+
+
+@router.get("/system/metrics/load", summary="Get System Load Average")
+async def get_load_average() -> Dict[str, Any]:
+    """Get system load average metrics for 1, 5, and 15 minute periods."""
+    try:
+        return system_metrics_service.get_load_average()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve load average metrics: {str(e)}"
+        )
+
+
+@router.get("/system/metrics/swap", summary="Get Swap Memory Metrics")
+async def get_swap_metrics() -> Dict[str, Any]:
+    """Get swap memory utilization metrics."""
+    try:
+        return system_metrics_service.get_swap_metrics()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve swap metrics: {str(e)}"
+        )
+
+
+@router.get("/system/info", summary="Get System Information")
+async def get_system_info() -> Dict[str, Any]:
+    """
+    Get general system information including uptime and process count.
+
+    Returns:
+    - System uptime in seconds and formatted string
+    - Total process count
+    - System boot time
+    """
+    try:
+        return system_metrics_service.get_system_info()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve system info: {str(e)}"
+        )

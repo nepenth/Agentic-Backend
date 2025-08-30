@@ -20,15 +20,19 @@ from app.config import settings
 def get_database_url():
     """Get database URL, with fallback for Docker hostnames."""
     original_url = settings.database_url
-    
-    # If the URL contains 'db:' (Docker hostname), try to replace with localhost
+
+    # If running inside Docker container, use the original URL
+    # If running on host, replace db:5432 with localhost:5432
     if 'db:5432' in original_url:
-        fallback_url = original_url.replace('db:5432', 'localhost:5432')
-        print(f"Detected Docker hostname in DATABASE_URL")
-        print(f"Original: {original_url}")
-        print(f"Trying with localhost: {fallback_url}")
-        return fallback_url
-    
+        # Check if we're running inside Docker by checking for /.dockerenv file
+        if os.path.exists('/.dockerenv'):
+            print(f"Running inside Docker container, using original URL: {original_url}")
+            return original_url
+        else:
+            fallback_url = original_url.replace('db:5432', 'localhost:5432')
+            print(f"Running on host, using localhost fallback: {fallback_url}")
+            return fallback_url
+
     return original_url
 
 

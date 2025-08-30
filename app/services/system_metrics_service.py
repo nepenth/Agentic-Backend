@@ -54,6 +54,21 @@ class SystemMetricsService:
             cpu_count = psutil.cpu_count()
             cpu_count_logical = psutil.cpu_count(logical=True)
 
+            # Get CPU temperature (if available)
+            cpu_temp = None
+            try:
+                temps = psutil.sensors_temperatures()
+                if 'coretemp' in temps:
+                    coretemp = temps['coretemp']
+                    if coretemp:
+                        cpu_temp = round(coretemp[0].current, 1)
+                elif 'cpu_thermal' in temps:
+                    cpu_thermal = temps['cpu_thermal']
+                    if cpu_thermal:
+                        cpu_temp = round(cpu_thermal[0].current, 1)
+            except:
+                pass
+
             # Calculate GHz values (handle None values)
             current_ghz = round(current_freq / 1000, 1) if current_freq and current_freq >= 100 else None
             min_ghz = round(min_freq / 1000, 1) if min_freq else None
@@ -71,6 +86,8 @@ class SystemMetricsService:
                     "min": round(min_freq, 0) if min_freq else None,
                     "max": round(max_freq, 0) if max_freq else None
                 },
+                "temperature_celsius": cpu_temp,
+                "temperature_fahrenheit": round((cpu_temp * 9/5) + 32, 1) if cpu_temp else None,
                 "times_percent": {
                     "user": round(cpu_times.user, 2),
                     "system": round(cpu_times.system, 2),
@@ -155,6 +172,19 @@ class SystemMetricsService:
                         "mtu": stats.mtu
                     })
 
+            # Calculate network speeds (bytes per second) - this is an approximation
+            # In a real implementation, you'd track previous values and calculate rates
+            network_speeds = None
+            if net_io:
+                # These are cumulative counters, not rates
+                # For actual speeds, you'd need to sample over time
+                network_speeds = {
+                    "bytes_sent_per_sec": net_io.bytes_sent,  # Placeholder - would need time-based calculation
+                    "bytes_recv_per_sec": net_io.bytes_recv,  # Placeholder - would need time-based calculation
+                    "packets_sent_per_sec": net_io.packets_sent,  # Placeholder
+                    "packets_recv_per_sec": net_io.packets_recv   # Placeholder
+                }
+
             return {
                 "io": {
                     "bytes_sent": net_io.bytes_sent,
@@ -166,78 +196,151 @@ class SystemMetricsService:
                     "dropin": net_io.dropin,
                     "dropout": net_io.dropout
                 } if net_io else None,
+                "speeds": network_speeds,
                 "interfaces": interfaces
             }
         except Exception as e:
             return {"error": f"Failed to get network metrics: {str(e)}"}
 
+    def get_load_average(self) -> Dict[str, Any]:
+        """Get system load average metrics."""
+        try:
+            load_avg = psutil.getloadavg()
+            return {
+                "1m": round(load_avg[0], 2),
+                "5m": round(load_avg[1], 2),
+                "15m": round(load_avg[2], 2)
+            }
+        except Exception as e:
+            return {"error": f"Failed to get load average: {str(e)}"}
+
+    def get_swap_metrics(self) -> Dict[str, Any]:
+        """Get swap memory utilization metrics."""
+        try:
+            swap = psutil.swap_memory()
+            return {
+                "total_gb": round(swap.total / (1024**3), 2),
+                "used_gb": round(swap.used / (1024**3), 2),
+                "free_gb": round(swap.free / (1024**3), 2),
+                "usage_percent": round(swap.percent, 2),
+                "sin": swap.sin,  # Pages swapped in
+                "sout": swap.sout  # Pages swapped out
+            }
+        except Exception as e:
+            return {"error": f"Failed to get swap metrics: {str(e)}"}
+
+    def get_system_info(self) -> Dict[str, Any]:
+        """Get general system information."""
+        try:
+            # Get system uptime
+            uptime_seconds = time.time() - psutil.boot_time()
+            uptime_days = int(uptime_seconds // (24 * 3600))
+            uptime_hours = int((uptime_seconds % (24 * 3600)) // 3600)
+            uptime_minutes = int((uptime_seconds % 3600) // 60)
+
+            # Get process count
+            process_count = len(psutil.pids())
+
+            return {
+                "uptime": {
+                    "seconds": int(uptime_seconds),
+                    "formatted": f"{uptime_days}d {uptime_hours}h {uptime_minutes}m"
+                },
+                "processes": {
+                    "total_count": process_count
+                },
+                "boot_time": datetime.fromtimestamp(psutil.boot_time()).isoformat() + "Z"
+            }
+        except Exception as e:
+            return {"error": f"Failed to get system info: {str(e)}"}
+
     def get_gpu_metrics(self) -> List[Dict[str, Any]]:
         """Get GPU utilization metrics for NVIDIA GPUs."""
-        if not NVML_AVAILABLE or not self.nvml_initialized:
-            return [{"error": "NVML not available or not initialized"}]
+        if not NVML_AVAILABLE:
+            return [{"error": "pynvml library not available. Install with: pip install pynvml"}]
+
+        # Try to initialize NVML if not already done
+        if not self.nvml_initialized:
+            try:
+                pynvml.nvmlInit()
+                self.nvml_initialized = True
+            except Exception as e:
+                return [{"error": f"Failed to initialize NVML: {str(e)}. Make sure NVIDIA drivers are installed and GPU is accessible."}]
 
         try:
             gpu_metrics = []
             device_count = pynvml.nvmlDeviceGetCount()
 
+            if device_count == 0:
+                return [{"error": "No NVIDIA GPUs detected"}]
+
             for i in range(device_count):
-                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-
-                # Get GPU name
-                name = pynvml.nvmlDeviceGetName(handle)
-
-                # Get utilization rates
-                utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-
-                # Get memory info
-                memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
-
-                # Get temperature
                 try:
-                    temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-                    # Convert Celsius to Fahrenheit
-                    temperature_f = round((temperature * 9/5) + 32, 1)
-                except:
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+
+                    # Get GPU name
+                    name = pynvml.nvmlDeviceGetName(handle)
+
+                    # Get utilization rates
+                    utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
+
+                    # Get memory info
+                    memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
+
+                    # Get temperature
                     temperature_f = None
+                    try:
+                        temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+                        # Convert Celsius to Fahrenheit
+                        temperature_f = round((temperature * 9/5) + 32, 1)
+                    except Exception as e:
+                        print(f"Warning: Could not get temperature for GPU {i}: {e}")
 
-                # Get clock frequencies
-                try:
-                    graphics_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
-                    memory_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)
-                except:
+                    # Get clock frequencies
                     graphics_clock = None
                     memory_clock = None
+                    try:
+                        graphics_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
+                        memory_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)
+                    except Exception as e:
+                        print(f"Warning: Could not get clock info for GPU {i}: {e}")
 
-                # Get power usage
-                try:
-                    power_usage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # Convert to watts
-                    power_limit = pynvml.nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
-                except:
+                    # Get power usage
                     power_usage = None
                     power_limit = None
+                    try:
+                        power_usage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # Convert to watts
+                        power_limit = pynvml.nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
+                    except Exception as e:
+                        print(f"Warning: Could not get power info for GPU {i}: {e}")
 
-                gpu_metrics.append({
-                    "index": i,
-                    "name": name.decode('utf-8') if isinstance(name, bytes) else str(name),
-                    "utilization": {
-                        "gpu_percent": utilization.gpu,
-                        "memory_percent": utilization.memory
-                    },
-                    "memory": {
-                        "total_mb": memory.total // (1024 * 1024),
-                        "used_mb": memory.used // (1024 * 1024),
-                        "free_mb": memory.free // (1024 * 1024)
-                    },
-                    "temperature_fahrenheit": temperature_f,
-                    "clocks": {
-                        "graphics_mhz": graphics_clock,
-                        "memory_mhz": memory_clock
-                    },
-                    "power": {
-                        "usage_watts": round(power_usage, 2) if power_usage else None,
-                        "limit_watts": round(power_limit, 2) if power_limit else None
-                    }
-                })
+                    gpu_metrics.append({
+                        "index": i,
+                        "name": name.decode('utf-8') if isinstance(name, bytes) else str(name),
+                        "utilization": {
+                            "gpu_percent": utilization.gpu,
+                            "memory_percent": utilization.memory
+                        },
+                        "memory": {
+                            "total_mb": memory.total // (1024 * 1024),
+                            "used_mb": memory.used // (1024 * 1024),
+                            "free_mb": memory.free // (1024 * 1024)
+                        },
+                        "temperature_fahrenheit": temperature_f,
+                        "clocks": {
+                            "graphics_mhz": graphics_clock,
+                            "memory_mhz": memory_clock
+                        },
+                        "power": {
+                            "usage_watts": round(power_usage, 2) if power_usage else None,
+                            "limit_watts": round(power_limit, 2) if power_limit else None
+                        }
+                    })
+                except Exception as e:
+                    gpu_metrics.append({
+                        "index": i,
+                        "error": f"Failed to get metrics for GPU {i}: {str(e)}"
+                    })
 
             return gpu_metrics
         except Exception as e:
@@ -251,7 +354,10 @@ class SystemMetricsService:
             "memory": self.get_memory_metrics(),
             "disk": self.get_disk_metrics(),
             "network": self.get_network_metrics(),
-            "gpu": self.get_gpu_metrics()
+            "gpu": self.get_gpu_metrics(),
+            "load_average": self.get_load_average(),
+            "swap": self.get_swap_metrics(),
+            "system": self.get_system_info()
         }
 
 

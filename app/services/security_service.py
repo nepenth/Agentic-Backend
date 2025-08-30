@@ -108,20 +108,31 @@ class SecurityService:
     """
 
     def __init__(self, log_service: Optional[LogService] = None):
-        self.log_service = log_service
-        self.limits = HomeLabLimits()
-        self.security_level = SecurityLevel.MODERATE
+        try:
+            self.log_service = log_service
+            self.limits = HomeLabLimits()
+            self.security_level = SecurityLevel.MODERATE
 
-        # Runtime tracking
-        self.active_agents: Dict[str, Dict[str, Any]] = {}
-        self.agent_resource_usage: Dict[str, Dict[str, Any]] = {}
-        self.rate_limiters: Dict[str, Dict[str, Any]] = {}
-        self.security_incidents: List[SecurityIncident] = []
+            # Runtime tracking
+            self.active_agents: Dict[str, Dict[str, Any]] = {}
+            self.agent_resource_usage: Dict[str, Dict[str, Any]] = {}
+            self.rate_limiters: Dict[str, Dict[str, Any]] = {}
+            self.security_incidents: List[SecurityIncident] = []
 
-        # Malicious pattern detection
-        self.malicious_patterns = self._load_malicious_patterns()
+            # Malicious pattern detection
+            self.malicious_patterns = self._load_malicious_patterns()
 
-        logger.info("SecurityService initialized with home-lab optimized limits")
+            logger.info("SecurityService initialized with home-lab optimized limits")
+        except Exception as e:
+            logger.error(f"Failed to initialize SecurityService: {e}")
+            # Initialize with minimal defaults to prevent crashes
+            self.limits = HomeLabLimits()
+            self.security_level = SecurityLevel.MODERATE
+            self.active_agents = {}
+            self.agent_resource_usage = {}
+            self.rate_limiters = {}
+            self.security_incidents = []
+            self.malicious_patterns = []
 
     def _load_malicious_patterns(self) -> List[Dict[str, Any]]:
         """Load patterns for detecting malicious content."""
