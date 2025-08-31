@@ -6,19 +6,24 @@ from .tool import AgentTool
 from .subscription import LogSubscription
 from .user import User
 from .agent_type import AgentType, DynamicTable, AgentBuilderSession, RegisteredTool, AgentDeletionLog
+from .secret import AgentSecret
+from .chat_session import ChatSession, ChatMessage
 
 __all__ = [
     "Agent",
     "Task",
-    "TaskLog", 
+    "TaskLog",
     "Session",
     "Embedding",
     "AgentTool",
     "LogSubscription",
     "User",
     "AgentType",
-    "DynamicTable", 
+    "DynamicTable",
     "AgentBuilderSession",
     "RegisteredTool",
     "AgentDeletionLog",
+    "AgentSecret",
+    "ChatSession",
+    "ChatMessage",
 ]

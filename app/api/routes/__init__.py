@@ -8,6 +8,9 @@ from .auth import router as auth_router
 from .security import router as security_router
 from .system_metrics import router as system_metrics_router
 from .ollama import router as ollama_router
+from .secrets import router as secrets_router
+from .chat import router as chat_router
+from .agent_builder import router as agent_builder_router
 
 # Create main API router
 api_router = APIRouter(prefix="/api/v1")
@@ -21,6 +24,9 @@ api_router.include_router(logs_router, prefix="/logs", tags=["logs"])
 api_router.include_router(security_router, prefix="/security", tags=["security"])
 api_router.include_router(system_metrics_router, tags=["system"])
 api_router.include_router(ollama_router, prefix="/ollama", tags=["ollama"])
+api_router.include_router(secrets_router, tags=["secrets"])
+api_router.include_router(chat_router, prefix="/chat", tags=["chat"])
+api_router.include_router(agent_builder_router, prefix="/agent-builder", tags=["agent-builder"])
 
 # WebSocket routes don't use /api/v1 prefix
 ws_router = APIRouter()

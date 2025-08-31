@@ -6,12 +6,20 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 from app.db.models.agent import Agent
 from app.db.models.agent_type import AgentType
+from app.db.models.secret import AgentSecret
 from app.api.dependencies import get_db_session, verify_api_key
 from app.services.schema_manager import SchemaManager
+from app.services.secrets_service import SecretsService
 from app.utils.logging import get_logger
 
 logger = get_logger("agents_api")
 router = APIRouter()
+
+
+class SecretInput(BaseModel):
+    key: str = Field(..., min_length=1, max_length=255, description="Secret key")
+    value: str = Field(..., min_length=1, description="Secret value")
+    description: Optional[str] = Field(None, description="Secret description")
 
 
 class AgentCreate(BaseModel):
@@ -20,6 +28,7 @@ class AgentCreate(BaseModel):
     model_name: str = Field(default="llama2", min_length=1, max_length=255)
     config: Optional[dict] = Field(default_factory=dict)
     agent_type: Optional[str] = Field(None, description="Agent type for dynamic agents")
+    secrets: Optional[List[SecretInput]] = Field(default_factory=list, description="List of secrets to create for this agent")
 
 
 class AgentUpdate(BaseModel):
@@ -39,6 +48,7 @@ class AgentResponse(BaseModel):
     is_active: bool
     created_at: str
     updated_at: str
+    secrets_count: int = Field(default=0, description="Number of secrets associated with this agent")
 
 
 @router.post("/create", response_model=AgentResponse, dependencies=[Depends(verify_api_key)])
@@ -85,7 +95,28 @@ async def create_agent(
         await db.commit()
         await db.refresh(agent)
 
-        return AgentResponse(**agent.to_dict())
+        # Create secrets if provided
+        if agent_data.secrets:
+            secrets_service = SecretsService(db)
+            for secret_input in agent_data.secrets:
+                try:
+                    await secrets_service.create_secret(
+                        agent_id=agent.id,
+                        secret_key=secret_input.key,
+                        secret_value=secret_input.value,
+                        description=secret_input.description
+                    )
+                    logger.info(f"Created secret '{secret_input.key}' for agent {agent.id}")
+                except Exception as e:
+                    logger.error(f"Failed to create secret '{secret_input.key}' for agent {agent.id}: {e}")
+                    # Continue with other secrets, don't fail the whole agent creation
+
+        # Get secrets count for the newly created agent
+        agent_dict = agent.to_dict()
+        secrets_count = len(agent_data.secrets) if agent_data.secrets else 0
+        agent_dict["secrets_count"] = secrets_count
+
+        return AgentResponse(**agent_dict)
 
     except HTTPException:
         raise
@@ -134,7 +165,22 @@ async def list_agents(
         result = await db.execute(query)
         agents = result.scalars().all()
 
-        return [AgentResponse(**agent.to_dict()) for agent in agents]
+        # Get secrets count for each agent
+        agent_responses = []
+        for agent in agents:
+            agent_dict = agent.to_dict()
+            # Count active secrets for this agent
+            secrets_count_result = await db.execute(
+                select(AgentSecret).where(
+                    AgentSecret.agent_id == agent.id,
+                    AgentSecret.is_active == True
+                )
+            )
+            secrets_count = len(secrets_count_result.scalars().all())
+            agent_dict["secrets_count"] = secrets_count
+            agent_responses.append(AgentResponse(**agent_dict))
+
+        return agent_responses
 
     except Exception as e:
         logger.error(f"Failed to list agents: {e}")
@@ -159,8 +205,19 @@ async def get_agent(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Agent not found"
             )
-        
-        return AgentResponse(**agent.to_dict())
+
+        # Get secrets count for this agent
+        agent_dict = agent.to_dict()
+        secrets_count_result = await db.execute(
+            select(AgentSecret).where(
+                AgentSecret.agent_id == agent.id,
+                AgentSecret.is_active == True
+            )
+        )
+        secrets_count = len(secrets_count_result.scalars().all())
+        agent_dict["secrets_count"] = secrets_count
+
+        return AgentResponse(**agent_dict)
         
     except HTTPException:
         raise
@@ -198,8 +255,19 @@ async def update_agent(
             await db.commit()
             await db.refresh(agent)
         
+        # Get secrets count for the updated agent
+        agent_dict = agent.to_dict()
+        secrets_count_result = await db.execute(
+            select(AgentSecret).where(
+                AgentSecret.agent_id == agent.id,
+                AgentSecret.is_active == True
+            )
+        )
+        secrets_count = len(secrets_count_result.scalars().all())
+        agent_dict["secrets_count"] = secrets_count
+
         logger.info(f"Updated agent: {agent_id}")
-        return AgentResponse(**agent.to_dict())
+        return AgentResponse(**agent_dict)
         
     except HTTPException:
         raise

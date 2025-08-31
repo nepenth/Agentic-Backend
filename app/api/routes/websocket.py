@@ -10,6 +10,8 @@ from app.api.dependencies import get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.user import User
 from sqlalchemy import select
+from app.services.chat_service import ChatService
+from uuid import UUID
 
 logger = get_logger("websocket")
 router = APIRouter()
@@ -257,6 +259,161 @@ async def websocket_task(
         logger.error(f"Task WebSocket error: {e}")
     finally:
         manager.unsubscribe_from_task(connection_id, task_id)
+        manager.disconnect(connection_id)
+
+
+@router.websocket("/chat/{session_id}")
+async def websocket_chat(
+    websocket: WebSocket,
+    session_id: UUID,
+    token: str = Query(..., description="JWT authentication token"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """WebSocket endpoint for real-time chat with LLM."""
+    connection_id = f"chat_{session_id}_{id(websocket)}"
+
+    # Validate JWT token
+    try:
+        user = await validate_websocket_token(token, db)
+        logger.info(f"Chat WebSocket authenticated for user: {user.username}")
+    except HTTPException as e:
+        logger.warning(f"Chat WebSocket authentication failed: {e.detail}")
+        await websocket.close(code=1008, reason="Authentication failed")
+        return
+
+    # Validate chat session exists and is active
+    chat_service = ChatService(db)
+    session = await chat_service.get_session(session_id)
+
+    if not session:
+        logger.warning(f"Chat session {session_id} not found")
+        await websocket.close(code=1008, reason="Chat session not found")
+        return
+
+    if not session.is_active:
+        logger.warning(f"Chat session {session_id} is not active")
+        await websocket.close(code=1008, reason="Chat session is not active")
+        return
+
+    await manager.connect(websocket, connection_id)
+
+    try:
+        # Send welcome message
+        await manager.send_personal_message({
+            "type": "connected",
+            "message": f"Connected to chat session {session_id}",
+            "session_id": str(session_id),
+            "session_type": session.session_type,
+            "model_name": session.model_name
+        }, connection_id)
+
+        # Keep connection alive and handle incoming messages
+        while True:
+            try:
+                data = await websocket.receive_text()
+                message = json.loads(data)
+
+                # Handle different message types
+                if message.get("type") == "ping":
+                    await manager.send_personal_message({
+                        "type": "pong",
+                        "timestamp": "2024-01-01T00:00:00Z"  # Will be dynamic
+                    }, connection_id)
+
+                elif message.get("type") == "chat_message":
+                    user_message = message.get("message", "").strip()
+                    if not user_message:
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": "Message cannot be empty"
+                        }, connection_id)
+                        continue
+
+                    # Send user message to LLM and get response
+                    try:
+                        result = await chat_service.send_message(
+                            session_id=session_id,
+                            user_message=user_message
+                        )
+
+                        # Send AI response back to client
+                        await manager.send_personal_message({
+                            "type": "chat_response",
+                            "session_id": str(session_id),
+                            "user_message": user_message,
+                            "ai_response": result["response"],
+                            "model": result["model"],
+                            "metadata": result["metadata"]
+                        }, connection_id)
+
+                    except Exception as e:
+                        logger.error(f"Error processing chat message: {e}")
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": f"Failed to process message: {str(e)}"
+                        }, connection_id)
+
+                elif message.get("type") == "get_history":
+                    # Send chat history
+                    messages = await chat_service.get_messages(session_id)
+                    message_history = [msg.to_dict() for msg in messages]
+
+                    await manager.send_personal_message({
+                        "type": "chat_history",
+                        "session_id": str(session_id),
+                        "messages": message_history
+                    }, connection_id)
+
+                elif message.get("type") == "update_session_status":
+                    new_status = message.get("status")
+                    if new_status in ["active", "completed", "archived"]:
+                        success = await chat_service.update_session_status(
+                            session_id=session_id,
+                            status=new_status
+                        )
+
+                        if success:
+                            await manager.send_personal_message({
+                                "type": "status_updated",
+                                "session_id": str(session_id),
+                                "status": new_status
+                            }, connection_id)
+                        else:
+                            await manager.send_personal_message({
+                                "type": "error",
+                                "message": "Failed to update session status"
+                            }, connection_id)
+                    else:
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": "Invalid status"
+                        }, connection_id)
+
+                else:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": f"Unknown message type: {message.get('type')}"
+                    }, connection_id)
+
+            except WebSocketDisconnect:
+                break
+            except json.JSONDecodeError:
+                await manager.send_personal_message({
+                    "type": "error",
+                    "message": "Invalid JSON format"
+                }, connection_id)
+            except Exception as e:
+                logger.error(f"Error handling chat WebSocket message: {e}")
+                await manager.send_personal_message({
+                    "type": "error",
+                    "message": str(e)
+                }, connection_id)
+
+    except WebSocketDisconnect:
+        logger.info(f"Chat WebSocket disconnected: {connection_id}")
+    except Exception as e:
+        logger.error(f"Chat WebSocket error: {e}")
+    finally:
         manager.disconnect(connection_id)
 
 

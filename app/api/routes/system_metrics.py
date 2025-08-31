@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+from typing import Dict, Any, List
 from app.services.system_metrics_service import system_metrics_service
 
 router = APIRouter()
@@ -77,7 +77,7 @@ async def get_network_metrics() -> Dict[str, Any]:
 
 
 @router.get("/system/metrics/gpu", summary="Get GPU Metrics")
-async def get_gpu_metrics() -> Dict[str, Any]:
+async def get_gpu_metrics() -> List[Dict[str, Any]]:
     """
     Get GPU utilization metrics for NVIDIA GPUs.
 
@@ -90,7 +90,7 @@ async def get_gpu_metrics() -> Dict[str, Any]:
     """
     try:
         gpu_data = system_metrics_service.get_gpu_metrics()
-        return {"gpus": gpu_data}
+        return gpu_data
     except Exception as e:
         raise HTTPException(
             status_code=500,

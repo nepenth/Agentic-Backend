@@ -34,7 +34,7 @@ async def get_security_status_endpoint(
 
     Requires admin privileges.
     """
-    if not current_user.is_admin:
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
@@ -68,7 +68,7 @@ async def update_security_status_endpoint(
 
     Requires admin privileges.
     """
-    if not current_user.is_admin:
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
@@ -109,7 +109,7 @@ async def get_agent_security_report_endpoint(
 
     Requires admin privileges or agent ownership.
     """
-    if not current_user.is_admin:
+    if not current_user.is_superuser:
         # TODO: Check if user owns the agent
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
@@ -166,7 +166,7 @@ async def get_security_incidents(
 
     Requires admin privileges.
     """
-    if not current_user.is_admin:
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
@@ -220,7 +220,7 @@ async def resolve_security_incident(
 
     Requires admin privileges.
     """
-    if not current_user.is_admin:
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:
@@ -257,7 +257,7 @@ async def get_security_limits(
 
     Requires admin privileges.
     """
-    if not current_user.is_admin:
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
     try:

@@ -25,10 +25,11 @@ class Agent(Base):
     
     # Relationships
     tasks = relationship("Task", back_populates="agent", cascade="all, delete-orphan")
-    sessions = relationship("Session", back_populates="agent", cascade="all, delete-orphan") 
+    sessions = relationship("Session", back_populates="agent", cascade="all, delete-orphan")
     tools = relationship("AgentTool", back_populates="agent", cascade="all, delete-orphan")
     task_logs = relationship("TaskLog", back_populates="agent")
     agent_type = relationship("AgentType", back_populates="agent_instances")
+    secrets = relationship("AgentSecret", back_populates="agent", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Agent(id={self.id}, name='{self.name}', model='{self.model_name}')>"
