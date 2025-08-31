@@ -234,6 +234,9 @@ class ChatService:
 
             ai_response = response.get("message", {}).get("content", "")
 
+            # Extract comprehensive performance metrics
+            performance_metrics = self._extract_performance_metrics(response, conversation)
+
             # Add AI response to session
             await self.add_message(
                 session_id=session_id,
@@ -242,8 +245,7 @@ class ChatService:
                 message_type="ai_response",
                 metadata={
                     "model": model,
-                    "response_time": response.get("total_duration", 0) / 1e9,  # Convert to seconds
-                    "tokens": response.get("eval_count", 0)
+                    **performance_metrics
                 }
             )
 
@@ -252,10 +254,7 @@ class ChatService:
                 "session_id": str(session_id),
                 "response": ai_response,
                 "model": model,
-                "metadata": {
-                    "response_time": response.get("total_duration", 0) / 1e9,
-                    "tokens": response.get("eval_count", 0)
-                }
+                "performance_metrics": performance_metrics
             }
 
         except Exception as e:
@@ -268,6 +267,45 @@ class ChatService:
                 message_type="error"
             )
             raise
+
+    def _extract_performance_metrics(self, ollama_response: Dict[str, Any], conversation: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Extract comprehensive performance metrics from Ollama response."""
+        metrics = {}
+
+        # Basic timing metrics (convert from nanoseconds to seconds)
+        total_duration = ollama_response.get("total_duration", 0) / 1e9
+        load_duration = ollama_response.get("load_duration", 0) / 1e9
+        prompt_eval_duration = ollama_response.get("prompt_eval_duration", 0) / 1e9
+        eval_duration = ollama_response.get("eval_duration", 0) / 1e9
+
+        # Token metrics
+        prompt_tokens = ollama_response.get("prompt_eval_count", 0)
+        response_tokens = ollama_response.get("eval_count", 0)
+        total_tokens = prompt_tokens + response_tokens
+
+        # Calculate tokens per second
+        tokens_per_second = 0.0
+        if eval_duration > 0:
+            tokens_per_second = response_tokens / eval_duration
+
+        # Context length (approximate from conversation)
+        context_length = sum(len(msg.get("content", "")) for msg in conversation)
+
+        metrics.update({
+            "response_time_seconds": round(total_duration, 3),
+            "load_time_seconds": round(load_duration, 3),
+            "prompt_eval_time_seconds": round(prompt_eval_duration, 3),
+            "generation_time_seconds": round(eval_duration, 3),
+            "prompt_tokens": prompt_tokens,
+            "response_tokens": response_tokens,
+            "total_tokens": total_tokens,
+            "tokens_per_second": round(tokens_per_second, 2),
+            "context_length_chars": context_length,
+            "model_name": ollama_response.get("model", ""),
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        return metrics
 
     def _format_conversation_for_ollama(self, messages: List[ChatMessage]) -> List[Dict[str, str]]:
         """Format chat messages for Ollama API."""

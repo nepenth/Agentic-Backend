@@ -54,11 +54,25 @@ class SendMessageRequest(BaseModel):
     model_name: Optional[str] = Field(None, description="Override the session's model for this message")
 
 
+class PerformanceMetrics(BaseModel):
+    response_time_seconds: float = Field(..., description="Total response time in seconds")
+    load_time_seconds: float = Field(..., description="Model loading time in seconds")
+    prompt_eval_time_seconds: float = Field(..., description="Prompt evaluation time in seconds")
+    generation_time_seconds: float = Field(..., description="Response generation time in seconds")
+    prompt_tokens: int = Field(..., description="Number of tokens in the prompt")
+    response_tokens: int = Field(..., description="Number of tokens generated in response")
+    total_tokens: int = Field(..., description="Total tokens processed (prompt + response)")
+    tokens_per_second: float = Field(..., description="Generation speed in tokens per second")
+    context_length_chars: int = Field(..., description="Approximate context length in characters")
+    model_name: str = Field(..., description="Model used for generation")
+    timestamp: str = Field(..., description="Timestamp of the response")
+
+
 class SendMessageResponse(BaseModel):
     session_id: str
     response: str
     model: str
-    metadata: Dict[str, Any]
+    performance_metrics: PerformanceMetrics
 
 
 class ChatStatsResponse(BaseModel):

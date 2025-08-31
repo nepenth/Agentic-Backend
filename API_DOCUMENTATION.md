@@ -137,6 +137,132 @@ The Agentic Backend now includes a comprehensive LLM chat system for interactive
 | `GET` | `/api/v1/chat/templates` | List available chat templates | ❌ |
 | `GET` | `/api/v1/chat/models` | List available Ollama models | ❌ |
 
+#### 📊 Chat Performance Metrics
+
+All chat responses now include comprehensive performance metrics to help monitor LLM performance and optimize user experience. These metrics are returned in the `performance_metrics` field of the response.
+
+**Send Message Response Format:**
+```json
+{
+  "session_id": "uuid-string",
+  "response": "AI generated response text",
+  "model": "llama2:13b",
+  "performance_metrics": {
+    "response_time_seconds": 2.456,
+    "load_time_seconds": 0.123,
+    "prompt_eval_time_seconds": 0.789,
+    "generation_time_seconds": 1.544,
+    "prompt_tokens": 156,
+    "response_tokens": 89,
+    "total_tokens": 245,
+    "tokens_per_second": 57.64,
+    "context_length_chars": 2048,
+    "model_name": "llama2:13b",
+    "timestamp": "2024-01-01T12:00:00.000Z"
+  }
+}
+```
+
+**Performance Metrics Breakdown:**
+
+| Metric | Description | Unit | Example |
+|--------|-------------|------|---------|
+| `response_time_seconds` | Total time for complete response | seconds | 2.456 |
+| `load_time_seconds` | Time to load model into memory | seconds | 0.123 |
+| `prompt_eval_time_seconds` | Time to process input prompt | seconds | 0.789 |
+| `generation_time_seconds` | Time to generate response | seconds | 1.544 |
+| `prompt_tokens` | Number of tokens in input prompt | count | 156 |
+| `response_tokens` | Number of tokens generated | count | 89 |
+| `total_tokens` | Total tokens processed | count | 245 |
+| `tokens_per_second` | Generation speed | tokens/sec | 57.64 |
+| `context_length_chars` | Approximate context length | characters | 2048 |
+| `model_name` | Model used for generation | string | "llama2:13b" |
+| `timestamp` | Response generation timestamp | ISO 8601 | "2024-01-01T12:00:00.000Z" |
+
+**Frontend Integration Example:**
+```javascript
+// Send message and display performance metrics
+async function sendChatMessage(sessionId, message) {
+  const response = await fetch(`/api/v1/chat/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message })
+  });
+
+  const data = await response.json();
+
+  // Display the AI response
+  displayMessage(data.response, 'assistant');
+
+  // Display performance metrics
+  displayPerformanceMetrics(data.performance_metrics);
+}
+
+function displayPerformanceMetrics(metrics) {
+  const metricsDiv = document.getElementById('performance-metrics');
+
+  metricsDiv.innerHTML = `
+    <div class="metrics-grid">
+      <div class="metric">
+        <span class="label">Response Time:</span>
+        <span class="value">${metrics.response_time_seconds.toFixed(2)}s</span>
+      </div>
+      <div class="metric">
+        <span class="label">Tokens/Second:</span>
+        <span class="value">${metrics.tokens_per_second.toFixed(1)}</span>
+      </div>
+      <div class="metric">
+        <span class="label">Total Tokens:</span>
+        <span class="value">${metrics.total_tokens}</span>
+      </div>
+      <div class="metric">
+        <span class="label">Model:</span>
+        <span class="value">${metrics.model_name}</span>
+      </div>
+    </div>
+  `;
+}
+```
+
+**CSS Styling Example:**
+```css
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  background: #f5f5f5;
+  border-radius: 5px;
+  font-size: 0.9em;
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metric .label {
+  font-weight: 500;
+  color: #666;
+}
+
+.metric .value {
+  font-weight: 600;
+  color: #333;
+}
+```
+
+**Use Cases for Performance Metrics:**
+
+1. **User Experience Monitoring**: Track response times to ensure optimal user experience
+2. **Model Performance Comparison**: Compare different models' speed and efficiency
+3. **Cost Optimization**: Monitor token usage for cost analysis
+4. **System Performance Tuning**: Identify bottlenecks in the LLM pipeline
+5. **Quality Assurance**: Ensure consistent performance across different loads
+6. **Debugging**: Identify slow responses and investigate root causes
+
 ## 🤖 AI-Assisted Agent Creation Wizard
 
 The Agentic Backend includes a sophisticated AI-assisted agent creation wizard that guides users through creating agents using conversational AI. This wizard integrates with the chat system to provide intelligent, step-by-step agent creation.
@@ -1192,7 +1318,7 @@ curl http://localhost:8000/api/v1/security/incidents?severity=low
 
 ### 💬 LLM Chat System Endpoints
 
-The Agentic Backend now includes a comprehensive LLM chat system for interactive agent creation and general AI assistance.
+The Agentic Backend now includes a comprehensive LLM chat system for interactive agent creation and general AI assistance. All chat responses include detailed performance metrics for monitoring and optimization.
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
@@ -1200,7 +1326,7 @@ The Agentic Backend now includes a comprehensive LLM chat system for interactive
 | `GET` | `/api/v1/chat/sessions` | List chat sessions | ❌ |
 | `GET` | `/api/v1/chat/sessions/{session_id}` | Get chat session details | ❌ |
 | `GET` | `/api/v1/chat/sessions/{session_id}/messages` | Get chat messages | ❌ |
-| `POST` | `/api/v1/chat/sessions/{session_id}/messages` | Send message to chat | ✅ |
+| `POST` | `/api/v1/chat/sessions/{session_id}/messages` | Send message to chat (includes performance metrics) | ✅ |
 | `PUT` | `/api/v1/chat/sessions/{session_id}/status` | Update session status | ✅ |
 | `GET` | `/api/v1/chat/sessions/{session_id}/stats` | Get session statistics | ❌ |
 | `DELETE` | `/api/v1/chat/sessions/{session_id}` | Delete chat session | ✅ |
@@ -2202,7 +2328,56 @@ Response:
 }
 ```
 
-### Example 2: Real-time Logging
+### Example 2: Chat with Performance Metrics
+
+**Send Chat Message with Performance Monitoring:**
+```javascript
+// Send a message and monitor performance
+const response = await fetch('/api/v1/chat/sessions/your-session-id/messages', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer your-api-key'
+  },
+  body: JSON.stringify({
+    message: "Explain quantum computing in simple terms"
+  })
+});
+
+const data = await response.json();
+
+// Display the response
+console.log('AI Response:', data.response);
+
+// Monitor performance metrics
+console.log('Performance Metrics:');
+console.log('- Response Time:', data.performance_metrics.response_time_seconds, 'seconds');
+console.log('- Tokens/Second:', data.performance_metrics.tokens_per_second);
+console.log('- Total Tokens:', data.performance_metrics.total_tokens);
+console.log('- Model Used:', data.performance_metrics.model_name);
+
+// Expected response format:
+// {
+//   "session_id": "uuid-string",
+//   "response": "Quantum computing uses quantum bits (qubits)...",
+//   "model": "llama2:13b",
+//   "performance_metrics": {
+//     "response_time_seconds": 3.245,
+//     "load_time_seconds": 0.056,
+//     "prompt_eval_time_seconds": 1.123,
+//     "generation_time_seconds": 2.066,
+//     "prompt_tokens": 45,
+//     "response_tokens": 156,
+//     "total_tokens": 201,
+//     "tokens_per_second": 75.46,
+//     "context_length_chars": 1024,
+//     "model_name": "llama2:13b",
+//     "timestamp": "2024-01-01T12:00:00.000Z"
+//   }
+// }
+```
+
+### Example 3: Real-time Logging
 
 **WebSocket Connection (JavaScript):**
 ```javascript
