@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     model_selection_default_text_model: str = Field(default="llama2", env="MODEL_SELECTION_DEFAULT_TEXT_MODEL")
 
     # Content Framework Configuration
+    cache_dir: str = Field(default="/tmp/content_cache", env="CACHE_DIR")
     content_cache_max_size_mb: int = Field(default=1024, env="CONTENT_CACHE_MAX_SIZE_MB")
     content_cache_ttl_seconds: int = Field(default=3600, env="CONTENT_CACHE_TTL_SECONDS")
     content_detection_magic_file: str = Field(default="/usr/share/file/magic.mgc", env="CONTENT_DETECTION_MAGIC_FILE")

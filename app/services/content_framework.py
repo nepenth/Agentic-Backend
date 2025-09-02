@@ -12,7 +12,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Union, BinaryIO, TextIO
+from typing import Dict, Any, List, Optional, Union, BinaryIO, TextIO, Tuple
 from enum import Enum
 from pathlib import Path
 import magic
@@ -21,7 +21,7 @@ from PIL import Image
 import mutagen
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
-from mutagen.wav import WAV
+from mutagen.wave import WAVE
 
 from app.config import settings
 from app.utils.logging import get_logger
@@ -407,7 +407,7 @@ class ContentDetector:
             elif file_path.lower().endswith('.flac'):
                 audio_file = FLAC(file_path)
             elif file_path.lower().endswith('.wav'):
-                audio_file = WAV(file_path)
+                audio_file = WAVE(file_path)
             else:
                 # Try mutagen's generic loader
                 from mutagen import File
@@ -454,7 +454,7 @@ class ContentCache:
     """Intelligent content caching with invalidation strategies."""
 
     def __init__(self, cache_dir: Optional[str] = None, max_size_mb: int = 1000):
-        self.cache_dir = Path(cache_dir or settings.CACHE_DIR or "/tmp/content_cache")
+        self.cache_dir = Path(cache_dir or settings.cache_dir or "/tmp/content_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_size_mb = max_size_mb
         self.cache_index: Dict[str, Dict[str, Any]] = {}

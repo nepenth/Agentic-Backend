@@ -29,9 +29,19 @@ import aiohttp
 from urllib.parse import urlparse, parse_qs
 
 from app.services.workflow_automation_service import workflow_automation_service
-from app.services.pubsub_service import PubSubService
+from app.services.pubsub_service import RedisPubSubService as PubSubService
 from app.services.system_metrics_service import SystemMetricsService
 from app.utils.logging import get_logger
+from app.db.database import get_db
+from app.db.models import (
+    WebhookSubscription,
+    WebhookDeliveryLog,
+    QueueItem,
+    BackendService,
+    BackendServiceMetrics,
+    LoadBalancerStats,
+    APIGatewayMetrics
+)
 
 logger = get_logger(__name__)
 
@@ -76,7 +86,7 @@ class WebhookSubscription:
     events: List[WebhookEvent]
     secret: str
     is_active: bool = True
-    created_at: datetime
+    created_at: datetime = field(default_factory=datetime.utcnow)
     last_triggered: Optional[datetime] = None
     failure_count: int = 0
     headers: Dict[str, str] = field(default_factory=dict)
@@ -529,13 +539,48 @@ class WebhookManager:
 
     async def _persist_webhook_subscription(self, subscription: WebhookSubscription):
         """Persist webhook subscription to database"""
-        # Implementation would save to database
-        pass
+        try:
+            async with get_db() as session:
+                db_subscription = WebhookSubscription(
+                    id=subscription.id,
+                    url=subscription.url,
+                    events=subscription.events,
+                    secret=subscription.secret,
+                    is_active=subscription.is_active,
+                    created_at=subscription.created_at,
+                    headers=subscription.headers,
+                    filters=subscription.filters
+                )
+                session.add(db_subscription)
+                await session.commit()
+                await session.refresh(db_subscription)
+
+                logger.info(f"Persisted webhook subscription: {subscription.id}")
+
+        except Exception as e:
+            logger.error(f"Failed to persist webhook subscription {subscription.id}: {e}")
+            raise
 
     async def _delete_webhook_subscription(self, subscription_id: str):
         """Delete webhook subscription from database"""
-        # Implementation would delete from database
-        pass
+        try:
+            async with get_db() as session:
+                # Find the subscription
+                result = await session.execute(
+                    select(WebhookSubscription).where(WebhookSubscription.id == subscription_id)
+                )
+                db_subscription = result.scalar_one_or_none()
+
+                if db_subscription:
+                    await session.delete(db_subscription)
+                    await session.commit()
+                    logger.info(f"Deleted webhook subscription: {subscription_id}")
+                else:
+                    logger.warning(f"Webhook subscription not found for deletion: {subscription_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to delete webhook subscription {subscription_id}: {e}")
+            raise
 
 
 # ============================================================================
@@ -778,8 +823,27 @@ class QueueManager:
             logger.error(f"Failed to send callback for item {item.id}: {e}")
 
     async def _persist_queue_item(self, queue_name: str, item: QueueItem):
-        """Persist queue item to Redis"""
+        """Persist queue item to database and Redis"""
         try:
+            # Persist to database
+            async with get_db() as session:
+                db_item = QueueItem(
+                    id=item.id,
+                    queue_name=queue_name,
+                    type=item.type,
+                    priority=item.priority.name.lower(),
+                    data=item.data,
+                    status="pending",
+                    created_at=item.created_at,
+                    retry_count=item.retry_count,
+                    max_retries=item.max_retries,
+                    callback_url=item.callback_url,
+                    processing_deadline=item.processing_deadline
+                )
+                session.add(db_item)
+                await session.commit()
+
+            # Also persist to Redis for fast access
             item_key = f"queue:{queue_name}:item:{item.id}"
             item_data = {
                 "id": item.id,
@@ -798,8 +862,22 @@ class QueueManager:
             logger.error(f"Failed to persist queue item {item.id}: {e}")
 
     async def _remove_queue_item(self, queue_name: str, item_id: str):
-        """Remove queue item from Redis"""
+        """Remove queue item from database and Redis"""
         try:
+            # Remove from database
+            async with get_db() as session:
+                result = await session.execute(
+                    select(QueueItem).where(
+                        QueueItem.id == item_id,
+                        QueueItem.queue_name == queue_name
+                    )
+                )
+                db_item = result.scalar_one_or_none()
+                if db_item:
+                    await session.delete(db_item)
+                    await session.commit()
+
+            # Remove from Redis
             item_key = f"queue:{queue_name}:item:{item_id}"
             await self.integration_service.redis.delete(item_key)
 
@@ -847,6 +925,25 @@ class LoadBalancer:
     async def register_backend(self, backend_id: str, backend_config: Dict[str, Any]):
         """Register a new backend service"""
         try:
+            # Persist to database
+            async with get_db() as session:
+                db_service = BackendService(
+                    id=backend_id,
+                    name=backend_config.get("name", backend_id),
+                    url=backend_config["url"],
+                    service_type=backend_config.get("service_type", "generic"),
+                    supported_request_types=backend_config.get("supported_request_types", []),
+                    is_active=backend_config.get("is_active", True),
+                    health_check_url=backend_config.get("health_check_url"),
+                    max_concurrent_requests=backend_config.get("max_concurrent_requests", 10),
+                    request_timeout_seconds=backend_config.get("request_timeout_seconds", 30),
+                    rate_limit_per_minute=backend_config.get("rate_limit_per_minute", 60),
+                    config=backend_config.get("config", {})
+                )
+                session.add(db_service)
+                await session.commit()
+
+            # Add to in-memory cache
             self.integration_service.backend_services[backend_id] = {
                 "config": backend_config,
                 "health": True,
@@ -863,16 +960,29 @@ class LoadBalancer:
 
         except Exception as e:
             logger.error(f"Failed to register backend {backend_id}: {e}")
+            raise
 
     async def unregister_backend(self, backend_id: str):
         """Unregister a backend service"""
         try:
+            # Remove from database
+            async with get_db() as session:
+                result = await session.execute(
+                    select(BackendService).where(BackendService.id == backend_id)
+                )
+                db_service = result.scalar_one_or_none()
+                if db_service:
+                    await session.delete(db_service)
+                    await session.commit()
+
+            # Remove from in-memory cache
             if backend_id in self.integration_service.backend_services:
                 del self.integration_service.backend_services[backend_id]
                 logger.info(f"Unregistered backend: {backend_id}")
 
         except Exception as e:
             logger.error(f"Failed to unregister backend {backend_id}: {e}")
+            raise
 
     async def get_backend_stats(self) -> Dict[str, Any]:
         """Get comprehensive backend statistics"""
@@ -1149,27 +1259,306 @@ async def _register_default_endpoints(self):
 # Add the method to the IntegrationLayerService class
 IntegrationLayerService._register_default_endpoints = _register_default_endpoints
 
-# Placeholder methods for endpoint handlers (would be implemented in full service)
+# Complete API endpoint handlers
 async def _handle_workflow_execution(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle workflow execution requests with comprehensive validation and monitoring"""
+    try:
+        data = await request.json()
+
+        # Validate request data
+        workflow_id = data.get('workflow_id')
+        if not workflow_id:
+            return web.json_response(
+                {"error": "workflow_id is required", "status": "error"},
+                status=400
+            )
+
+        # Check if workflow exists
+        if workflow_id not in self.workflow_service.workflow_definitions:
+            return web.json_response(
+                {"error": f"Workflow not found: {workflow_id}", "status": "error"},
+                status=404
+            )
+
+        # Validate priority
+        priority_str = data.get('priority', 'normal')
+        if priority_str not in ['low', 'normal', 'high', 'critical']:
+            return web.json_response(
+                {"error": "Invalid priority level. Must be: low, normal, high, critical", "status": "error"},
+                status=400
+            )
+
+        # Execute workflow
+        execution_id = await self.workflow_service.execute_workflow(
+            workflow_id,
+            data.get('parameters', {}),
+            Priority[priority_str.upper()]
+        )
+
+        # Log successful execution start
+        logger.info(f"Workflow execution started: {execution_id} for workflow {workflow_id}")
+
+        return web.json_response({
+            "status": "success",
+            "execution_id": execution_id,
+            "workflow_id": workflow_id,
+            "message": "Workflow execution started successfully",
+            "priority": priority_str
+        })
+
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"error": "Invalid JSON in request body", "status": "error"},
+            status=400
+        )
+    except ValueError as e:
+        return web.json_response(
+            {"error": str(e), "status": "error"},
+            status=400
+        )
+    except Exception as e:
+        logger.error(f"Workflow execution failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 async def _handle_workflow_schedule(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle workflow scheduling requests"""
+    try:
+        data = await request.json()
+
+        # Validate request data
+        workflow_id = data.get('workflow_id')
+        trigger_config = data.get('trigger_config')
+
+        if not workflow_id:
+            return web.json_response(
+                {"error": "workflow_id is required", "status": "error"},
+                status=400
+            )
+
+        if not trigger_config:
+            return web.json_response(
+                {"error": "trigger_config is required", "status": "error"},
+                status=400
+            )
+
+        # Check if workflow exists
+        if workflow_id not in self.workflow_service.workflow_definitions:
+            return web.json_response(
+                {"error": f"Workflow not found: {workflow_id}", "status": "error"},
+                status=404
+            )
+
+        # Schedule workflow
+        schedule_id = await self.workflow_service.schedule_workflow(
+            workflow_id,
+            trigger_config,
+            data.get('parameters', {})
+        )
+
+        return web.json_response({
+            "status": "success",
+            "schedule_id": schedule_id,
+            "workflow_id": workflow_id,
+            "message": "Workflow scheduled successfully"
+        })
+
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"error": "Invalid JSON in request body", "status": "error"},
+            status=400
+        )
+    except Exception as e:
+        logger.error(f"Workflow scheduling failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 async def _handle_webhook_subscribe(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle webhook subscription requests"""
+    try:
+        data = await request.json()
+
+        # Validate request data
+        url = data.get('url')
+        events = data.get('events')
+
+        if not url:
+            return web.json_response(
+                {"error": "url is required", "status": "error"},
+                status=400
+            )
+
+        if not events or not isinstance(events, list):
+            return web.json_response(
+                {"error": "events must be a non-empty array", "status": "error"},
+                status=400
+            )
+
+        # Validate events
+        valid_events = ['workflow.started', 'workflow.completed', 'workflow.failed', 'step.completed', 'step.failed']
+        invalid_events = [event for event in events if event not in valid_events]
+        if invalid_events:
+            return web.json_response(
+                {"error": f"Invalid events: {invalid_events}. Valid events: {valid_events}", "status": "error"},
+                status=400
+            )
+
+        # Create subscription
+        subscription_id = await self.webhook_manager.subscribe_webhook(data)
+
+        return web.json_response({
+            "status": "success",
+            "subscription_id": subscription_id,
+            "message": "Webhook subscription created successfully"
+        })
+
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"error": "Invalid JSON in request body", "status": "error"},
+            status=400
+        )
+    except Exception as e:
+        logger.error(f"Webhook subscription failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 async def _handle_webhook_unsubscribe(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle webhook unsubscription requests"""
+    try:
+        subscription_id = request.match_info.get('subscription_id')
+
+        if not subscription_id:
+            return web.json_response(
+                {"error": "subscription_id is required", "status": "error"},
+                status=400
+            )
+
+        # Unsubscribe
+        success = await self.webhook_manager.unsubscribe_webhook(subscription_id)
+
+        if not success:
+            return web.json_response(
+                {"error": f"Subscription not found: {subscription_id}", "status": "error"},
+                status=404
+            )
+
+        return web.json_response({
+            "status": "success",
+            "message": "Webhook subscription removed successfully"
+        })
+
+    except Exception as e:
+        logger.error(f"Webhook unsubscription failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 async def _handle_queue_enqueue(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle queue item enqueue requests"""
+    try:
+        data = await request.json()
+
+        # Validate request data
+        queue_name = data.get('queue_name')
+        item_data = data.get('data')
+
+        if not queue_name:
+            return web.json_response(
+                {"error": "queue_name is required", "status": "error"},
+                status=400
+            )
+
+        if not item_data:
+            return web.json_response(
+                {"error": "data is required", "status": "error"},
+                status=400
+            )
+
+        # Validate priority
+        priority_str = data.get('priority', 'normal')
+        if priority_str not in ['low', 'normal', 'high', 'critical']:
+            return web.json_response(
+                {"error": "Invalid priority level. Must be: low, normal, high, critical", "status": "error"},
+                status=400
+            )
+
+        # Enqueue item
+        item_id = await self.queue_manager.enqueue_item(
+            queue_name,
+            item_data,
+            QueuePriority[priority_str.upper()]
+        )
+
+        return web.json_response({
+            "status": "success",
+            "item_id": item_id,
+            "queue_name": queue_name,
+            "message": "Item enqueued successfully"
+        })
+
+    except json.JSONDecodeError:
+        return web.json_response(
+            {"error": "Invalid JSON in request body", "status": "error"},
+            status=400
+        )
+    except Exception as e:
+        logger.error(f"Queue enqueue failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 async def _handle_queue_stats(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle queue statistics requests"""
+    try:
+        queue_name = request.match_info.get('queue_name')
+
+        if not queue_name:
+            return web.json_response(
+                {"error": "queue_name is required", "status": "error"},
+                status=400
+            )
+
+        # Get queue statistics
+        stats = await self.queue_manager.get_queue_stats(queue_name)
+
+        return web.json_response({
+            "status": "success",
+            "queue_name": queue_name,
+            "stats": stats
+        })
+
+    except Exception as e:
+        logger.error(f"Queue stats retrieval failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 async def _handle_backend_stats(self, request):
-    return web.json_response({"status": "not_implemented"})
+    """Handle backend statistics requests"""
+    try:
+        # Get backend statistics
+        stats = await self.load_balancer.get_backend_stats()
+
+        return web.json_response({
+            "status": "success",
+            "stats": stats
+        })
+
+    except Exception as e:
+        logger.error(f"Backend stats retrieval failed: {e}")
+        return web.json_response(
+            {"error": "Internal server error", "status": "error"},
+            status=500
+        )
 
 # Add placeholder methods to IntegrationLayerService
 IntegrationLayerService._handle_workflow_execution = _handle_workflow_execution
@@ -1186,13 +1575,72 @@ IntegrationLayerService._handle_backend_stats = _handle_backend_stats
 
 async def _load_webhook_subscriptions(self):
     """Load webhook subscriptions from database"""
-    # Implementation would load from database
-    pass
+    try:
+        async with get_db() as session:
+            result = await session.execute(select(WebhookSubscription))
+            db_subscriptions = result.scalars().all()
+
+            for db_sub in db_subscriptions:
+                # Convert to service model
+                subscription = WebhookSubscription(
+                    id=str(db_sub.id),
+                    url=db_sub.url,
+                    events=db_sub.events,
+                    secret=db_sub.secret,
+                    is_active=db_sub.is_active,
+                    created_at=db_sub.created_at,
+                    last_triggered=db_sub.last_triggered,
+                    failure_count=db_sub.failure_count,
+                    headers=db_sub.headers,
+                    filters=db_sub.filters
+                )
+                self.webhook_subscriptions[subscription.id] = subscription
+
+            logger.info(f"Loaded {len(db_subscriptions)} webhook subscriptions from database")
+
+    except Exception as e:
+        logger.error(f"Failed to load webhook subscriptions: {e}")
+        raise
 
 async def _load_backend_services(self):
     """Load backend services from database"""
-    # Implementation would load from database
-    pass
+    try:
+        async with get_db() as session:
+            result = await session.execute(select(BackendService))
+            db_services = result.scalars().all()
+
+            for db_service in db_services:
+                # Convert to service format
+                service_config = {
+                    "id": str(db_service.id),
+                    "name": db_service.name,
+                    "url": db_service.url,
+                    "service_type": db_service.service_type,
+                    "supported_request_types": db_service.supported_request_types,
+                    "health_check_url": db_service.health_check_url,
+                    "max_concurrent_requests": db_service.max_concurrent_requests,
+                    "request_timeout_seconds": db_service.request_timeout_seconds,
+                    "rate_limit_per_minute": db_service.rate_limit_per_minute,
+                    **db_service.config
+                }
+
+                self.backend_services[str(db_service.id)] = {
+                    "config": service_config,
+                    "health": db_service.health_status == "healthy",
+                    "last_health_check": db_service.last_health_check,
+                    "stats": {
+                        "total_requests": 0,  # Will be loaded from metrics
+                        "active_requests": 0,
+                        "average_response_time": 0.0,
+                        "error_rate": 0.0
+                    }
+                }
+
+            logger.info(f"Loaded {len(db_services)} backend services from database")
+
+    except Exception as e:
+        logger.error(f"Failed to load backend services: {e}")
+        raise
 
 # Add methods to IntegrationLayerService
 IntegrationLayerService._load_webhook_subscriptions = _load_webhook_subscriptions

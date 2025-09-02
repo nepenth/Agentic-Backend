@@ -18,6 +18,7 @@ class ModelPerformanceMetrics(Base):
     __tablename__ = "model_performance_metrics"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    model_id = Column(UUID(as_uuid=True), ForeignKey("model_registry.id"), nullable=True, index=True)
     model_name = Column(String(255), nullable=False, index=True)
     model_version = Column(String(100), nullable=True)
     task_type = Column(String(100), nullable=False, index=True)  # text_generation, image_analysis, etc.
@@ -39,7 +40,7 @@ class ModelPerformanceMetrics(Base):
     performance_score = Column(Float, nullable=False, default=0.0)
 
     # Metadata
-    metadata = Column(JSONB, nullable=True, default=dict)
+    model_metadata = Column(JSONB, nullable=True, default=dict)
     last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -62,7 +63,7 @@ class ModelPerformanceMetrics(Base):
             "model_size_mb": self.model_size_mb,
             "context_length": self.context_length,
             "performance_score": self.performance_score,
-            "metadata": self.metadata,
+            "model_metadata": self.model_metadata,
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -73,6 +74,7 @@ class ModelUsageLog(Base):
     __tablename__ = "model_usage_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    model_id = Column(UUID(as_uuid=True), ForeignKey("model_registry.id"), nullable=True, index=True)
     model_name = Column(String(255), nullable=False, index=True)
     model_version = Column(String(100), nullable=True)
     task_type = Column(String(100), nullable=False, index=True)
@@ -166,7 +168,7 @@ class ModelRegistry(Base):
     # Metadata
     description = Column(Text, nullable=True)
     tags = Column(ARRAY(String), nullable=True)
-    metadata = Column(JSONB, nullable=True, default=dict)
+    registry_metadata = Column(JSONB, nullable=True, default=dict)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -198,7 +200,7 @@ class ModelRegistry(Base):
             "supported_formats": self.supported_formats,
             "description": self.description,
             "tags": self.tags,
-            "metadata": self.metadata,
+            "registry_metadata": self.registry_metadata,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

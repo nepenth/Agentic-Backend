@@ -33,6 +33,6 @@ class Embedding(Base):
             "id": str(self.id),
             "task_id": str(self.task_id),
             "content_hash": self.content_hash,
-            "metadata": self.meta_data,
+            "meta_data": self.meta_data,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

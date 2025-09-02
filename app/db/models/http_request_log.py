@@ -157,7 +157,7 @@ class HttpClientMetrics(Base):
     common_errors = Column(JSONB, nullable=True, default=dict)
 
     # Metadata
-    metadata = Column(JSONB, nullable=True, default=dict)
+    metrics_metadata = Column(JSONB, nullable=True, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     def __repr__(self):
@@ -190,7 +190,7 @@ class HttpClientMetrics(Base):
             "bytes_received_per_minute": self.bytes_received_per_minute,
             "top_endpoints": self.top_endpoints,
             "common_errors": self.common_errors,
-            "metadata": self.metadata,
+            "metrics_metadata": self.metrics_metadata,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -241,7 +241,7 @@ class HttpClientConfig(Base):
     # Metadata
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
-    metadata = Column(JSONB, nullable=True, default=dict)
+    config_metadata = Column(JSONB, nullable=True, default=dict)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -278,7 +278,7 @@ class HttpClientConfig(Base):
             "blocked_domains": self.blocked_domains,
             "description": self.description,
             "is_active": self.is_active,
-            "metadata": self.metadata,
+            "config_metadata": self.config_metadata,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

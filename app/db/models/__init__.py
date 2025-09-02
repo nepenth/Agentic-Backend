@@ -20,6 +20,29 @@ from .content import (
     ContentCache,
     ContentAnalytics
 )
+from .webhook_subscription import WebhookSubscription, WebhookDeliveryLog
+from .workflow import (
+    WorkflowDefinition,
+    WorkflowExecution,
+    WorkflowSchedule,
+    WorkflowExecutionLog,
+    WorkflowMetrics
+)
+from .knowledge_base import (
+    KnowledgeBaseItem,
+    KnowledgeBaseCategory,
+    KnowledgeBaseEmbedding,
+    KnowledgeBaseAnalysis,
+    KnowledgeBaseMedia,
+    KnowledgeBaseSearchLog
+)
+from .integration_layer import (
+    QueueItem,
+    BackendService,
+    BackendServiceMetrics,
+    LoadBalancerStats,
+    APIGatewayMetrics
+)
 
 __all__ = [
     "Agent",
@@ -52,4 +75,22 @@ __all__ = [
     "ContentBatchItem",
     "ContentCache",
     "ContentAnalytics",
+    "WebhookSubscription",
+    "WebhookDeliveryLog",
+    "WorkflowDefinition",
+    "WorkflowExecution",
+    "WorkflowSchedule",
+    "WorkflowExecutionLog",
+    "WorkflowMetrics",
+    "KnowledgeBaseItem",
+    "KnowledgeBaseCategory",
+    "KnowledgeBaseEmbedding",
+    "KnowledgeBaseAnalysis",
+    "KnowledgeBaseMedia",
+    "KnowledgeBaseSearchLog",
+    "QueueItem",
+    "BackendService",
+    "BackendServiceMetrics",
+    "LoadBalancerStats",
+    "APIGatewayMetrics",
 ]

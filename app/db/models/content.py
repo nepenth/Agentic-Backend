@@ -6,10 +6,18 @@ through various connectors and their processing results.
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey, Index, Float
-from sqlalchemy.dialects.postgresql import UUID, JSONB, VECTOR
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
+
+# Import VECTOR type from pgvector if available, otherwise use a fallback
+try:
+    from pgvector.sqlalchemy import Vector
+    VECTOR = Vector
+except ImportError:
+    # Fallback for systems without pgvector extension
+    from sqlalchemy import String as VECTOR
 
 from app.db.database import Base
 
@@ -44,7 +52,7 @@ class ContentItem(Base):
     last_processed_at = Column(DateTime, nullable=True)
 
     # Flexible metadata storage
-    metadata = Column(JSONB, nullable=True)  # Additional metadata as JSON
+    content_metadata = Column(JSONB, nullable=True)  # Additional metadata as JSON
     tags = Column(JSONB, nullable=True)  # Tags as JSON array
     custom_fields = Column(JSONB, nullable=True)  # Custom fields as JSON
 
@@ -96,7 +104,7 @@ class ContentProcessingResult(Base):
     accuracy_score = Column(Float, nullable=True)  # 0.0 to 1.0
 
     # Additional metadata
-    metadata = Column(JSONB, nullable=True)  # Additional processing metadata
+    processing_metadata = Column(JSONB, nullable=True)  # Additional processing metadata
     custom_metrics = Column(JSONB, nullable=True)  # Custom metrics as JSON
 
     # Relationships
@@ -128,7 +136,7 @@ class ContentEmbedding(Base):
     embedding_dimensions = Column(Integer, nullable=False)
 
     # The actual embedding vector
-    embedding_vector = Column(VECTOR(1536), nullable=False)  # Adjust dimension based on model
+    embedding_vector = Column(VECTOR, nullable=False)  # Vector type for embeddings
 
     # Content chunk information (for large content)
     content_chunk = Column(Text, nullable=True)  # The actual text chunk
@@ -144,7 +152,7 @@ class ContentEmbedding(Base):
     validation_status = Column(String(50), default="valid")  # valid, invalid, pending
 
     # Additional metadata
-    metadata = Column(JSONB, nullable=True)
+    embedding_metadata = Column(JSONB, nullable=True)
 
     # Relationships
     content_item = relationship("ContentItem")
@@ -238,7 +246,7 @@ class ContentBatch(Base):
     # Metadata
     created_by = Column(String(200), nullable=True)  # User or system that created the batch
     priority = Column(Integer, default=0, nullable=False)  # 0=low, 1=normal, 2=high, 3=critical
-    metadata = Column(JSONB, nullable=True)
+    batch_metadata = Column(JSONB, nullable=True)
 
     # Indexes for performance
     __table_args__ = (
@@ -279,7 +287,7 @@ class ContentBatchItem(Base):
     item_order = Column(Integer, nullable=False)
 
     # Metadata
-    metadata = Column(JSONB, nullable=True)
+    item_metadata = Column(JSONB, nullable=True)
 
     # Relationships
     batch = relationship("ContentBatch")
@@ -321,7 +329,7 @@ class ContentCache(Base):
     checksum = Column(String(128), nullable=True)  # SHA256 or similar
 
     # Metadata
-    metadata = Column(JSONB, nullable=True)
+    cache_metadata = Column(JSONB, nullable=True)
 
     # Relationships
     content_item = relationship("ContentItem")
@@ -366,7 +374,7 @@ class ContentAnalytics(Base):
     # Metadata
     calculated_at = Column(DateTime, default=func.now(), nullable=False)
     data_source = Column(String(200), nullable=True)  # Source of analytics data
-    metadata = Column(JSONB, nullable=True)
+    analytics_metadata = Column(JSONB, nullable=True)
 
     # Relationships
     content_item = relationship("ContentItem")
@@ -380,3 +388,75 @@ class ContentAnalytics(Base):
 
     def __repr__(self):
         return f"<ContentAnalytics(id={self.id}, type={self.analytics_type}, quality={self.quality_score})>"
+
+
+class UserInteraction(Base):
+    """Model for tracking user interactions with content."""
+    __tablename__ = "user_interactions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String(200), nullable=False, index=True)
+    content_item_id = Column(UUID(as_uuid=True), ForeignKey('content_items.id'), nullable=False, index=True)
+
+    # Interaction details
+    interaction_type = Column(String(50), nullable=False)  # view, like, share, bookmark, comment, click, dismiss, skip
+    content_type = Column(String(50), nullable=True)  # Cached for performance
+    source_type = Column(String(100), nullable=True)  # Cached for performance
+    topics = Column(JSONB, nullable=True)  # Topics associated with the content
+
+    # Timing and context
+    created_at = Column(DateTime, default=func.now(), nullable=False, index=True)
+    session_id = Column(String(200), nullable=True)
+    device_type = Column(String(50), nullable=True)  # desktop, mobile, tablet
+    user_agent = Column(Text, nullable=True)
+
+    # Additional metadata
+    interaction_metadata = Column(JSONB, nullable=True)  # Additional interaction metadata
+
+    # Relationships
+    content_item = relationship("ContentItem")
+
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_user_interactions_user_type', 'user_id', 'interaction_type'),
+        Index('idx_user_interactions_content_user', 'content_item_id', 'user_id'),
+        Index('idx_user_interactions_created_at', 'created_at'),
+        Index('idx_user_interactions_type_created', 'interaction_type', 'created_at'),
+    )
+
+    def __repr__(self):
+        return f"<UserInteraction(id={self.id}, user={self.user_id}, type={self.interaction_type})>"
+
+
+class SearchLog(Base):
+    """Model for tracking search queries and results."""
+    __tablename__ = "search_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String(200), nullable=True, index=True)
+    query = Column(Text, nullable=False)
+    search_type = Column(String(50), nullable=False)  # semantic, keyword, hybrid
+    results_count = Column(Integer, nullable=False)
+    response_time_ms = Column(Float, nullable=False)
+    has_results = Column(Boolean, default=True)
+    click_through = Column(Boolean, default=False)
+    clicked_positions = Column(JSONB, nullable=True)  # Array of clicked result positions
+    session_id = Column(String(200), nullable=True)
+    device_type = Column(String(50), nullable=True)  # desktop, mobile, tablet
+    user_agent = Column(Text, nullable=True)
+    ip_address = Column(String(45), nullable=True)  # Support IPv4 and IPv6
+    created_at = Column(DateTime, default=func.now(), nullable=False, index=True)
+
+    # Additional metadata
+    search_metadata = Column(JSONB, nullable=True)  # Additional search metadata
+
+    # Indexes for performance
+    __table_args__ = (
+        Index('idx_search_logs_user_query', 'user_id', 'query'),
+        Index('idx_search_logs_type_created', 'search_type', 'created_at'),
+        Index('idx_search_logs_created_at', 'created_at'),
+        Index('idx_search_logs_has_results', 'has_results'),
+    )
+
+    def __repr__(self):
+        return f"<SearchLog(id={self.id}, query='{self.query[:50]}...', type={self.search_type})>"

@@ -18,7 +18,7 @@ import hashlib
 
 from app.connectors.base import ContentData, ContentType, ValidationResult, ValidationStatus
 from app.services.model_selection_service import model_selector
-from app.services.semantic_processing import semantic_processor
+from app.services.semantic_processing import embedding_service
 from app.utils.logging import get_logger
 
 logger = get_logger("content_pipeline")
@@ -851,8 +851,8 @@ class ContentProcessingPipeline:
 
     async def _apply_semantic_processing(self, content_data: ContentData, processed_content: Dict[str, Any]) -> Dict[str, Any]:
         """Apply semantic processing to content."""
-        if not semantic_processor:
-            return {"error": "Semantic processor not available"}
+        if not embedding_service:
+            return {"error": "Embedding service not available"}
 
         try:
             # Extract text for semantic analysis
@@ -866,7 +866,7 @@ class ContentProcessingPipeline:
 
             if text_to_analyze:
                 # Generate embeddings
-                embedding = await semantic_processor.generate_embedding(text_to_analyze)
+                embedding = await embedding_service.generate_embedding(text_to_analyze)
 
                 # Find similar content (placeholder)
                 similar_content = []

@@ -29,7 +29,7 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db.database import get_db
-from app.services.pubsub_service import PubSubService
+from app.services.pubsub_service import RedisPubSubService as PubSubService
 from app.services.system_metrics_service import SystemMetricsService
 from app.utils.logging import get_logger
 

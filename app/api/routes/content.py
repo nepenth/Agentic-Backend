@@ -13,20 +13,20 @@ from pydantic import BaseModel, Field
 import json
 
 from app.connectors.base import (
-    ContentConnectorRegistry,
+    ConnectorRegistry,
     ContentItem,
     ContentData,
     ValidationResult,
     ConnectorType,
-    ContentType
+    ContentType,
+    ConnectorConfig
 )
-from app.connectors.web import RSSConnector, WebScraperConnector
-from app.connectors.social import TwitterConnector, RedditConnector, LinkedInConnector
+from app.connectors.web import RSSFeedConnector, WebScrapingConnector
+from app.connectors.social_media import TwitterConnector, RedditConnector, LinkedInConnector
 from app.connectors.communication import EmailConnector, SlackConnector, DiscordConnector
-from app.connectors.filesystem import LocalFileSystemConnector, S3Connector, GCSConnector
+from app.connectors.filesystem import LocalFileSystemConnector, S3Connector, GoogleCloudStorageConnector
 from app.connectors.api import RESTAPIConnector, GraphQLConnector, WebSocketConnector
 from app.processors.content_pipeline import ContentProcessingPipeline, ProcessingResult
-from app.services.security_service import SecurityService
 from app.utils.logging import get_logger
 
 logger = get_logger("content_routes")
@@ -35,36 +35,92 @@ logger = get_logger("content_routes")
 router = APIRouter(prefix="/api/v1/content", tags=["content"])
 
 # Global instances
-connector_registry = ContentConnectorRegistry()
-content_pipeline = ContentProcessingPipeline()
+connector_registry = ConnectorRegistry()
+content_pipeline = ContentProcessingPipeline({})
 
 # Initialize connectors
 def initialize_connectors():
     """Initialize and register all available connectors."""
     try:
         # Web connectors
-        connector_registry.register("rss", RSSConnector())
-        connector_registry.register("web_scraper", WebScraperConnector())
+        connector_registry.register(RSSFeedConnector(ConnectorConfig(
+            name="rss",
+            connector_type=ConnectorType.WEB,
+            source_config={}
+        )))
+        connector_registry.register(WebScrapingConnector(ConnectorConfig(
+            name="web_scraper",
+            connector_type=ConnectorType.WEB,
+            source_config={}
+        )))
 
         # Social media connectors
-        connector_registry.register("twitter", TwitterConnector())
-        connector_registry.register("reddit", RedditConnector())
-        connector_registry.register("linkedin", LinkedInConnector())
+        connector_registry.register(TwitterConnector(ConnectorConfig(
+            name="twitter",
+            connector_type=ConnectorType.SOCIAL_MEDIA,
+            source_config={}
+        )))
+        connector_registry.register(RedditConnector(ConnectorConfig(
+            name="reddit",
+            connector_type=ConnectorType.SOCIAL_MEDIA,
+            source_config={}
+        )))
+        connector_registry.register(LinkedInConnector(ConnectorConfig(
+            name="linkedin",
+            connector_type=ConnectorType.SOCIAL_MEDIA,
+            source_config={}
+        )))
 
         # Communication connectors
-        connector_registry.register("email", EmailConnector())
-        connector_registry.register("slack", SlackConnector())
-        connector_registry.register("discord", DiscordConnector())
+        connector_registry.register(EmailConnector(ConnectorConfig(
+            name="email",
+            connector_type=ConnectorType.COMMUNICATION,
+            source_config={}
+        )))
+        connector_registry.register(SlackConnector(ConnectorConfig(
+            name="slack",
+            connector_type=ConnectorType.COMMUNICATION,
+            source_config={}
+        )))
+        connector_registry.register(DiscordConnector(ConnectorConfig(
+            name="discord",
+            connector_type=ConnectorType.COMMUNICATION,
+            source_config={}
+        )))
 
         # File system connectors
-        connector_registry.register("local_fs", LocalFileSystemConnector())
-        connector_registry.register("s3", S3Connector())
-        connector_registry.register("gcs", GCSConnector())
+        connector_registry.register(LocalFileSystemConnector(ConnectorConfig(
+            name="local_fs",
+            connector_type=ConnectorType.FILE_SYSTEM,
+            source_config={}
+        )))
+        connector_registry.register(S3Connector(ConnectorConfig(
+            name="s3",
+            connector_type=ConnectorType.FILE_SYSTEM,
+            source_config={}
+        )))
+        connector_registry.register(GoogleCloudStorageConnector(ConnectorConfig(
+            name="gcs",
+            connector_type=ConnectorType.FILE_SYSTEM,
+            source_config={}
+        )))
 
         # API connectors
-        connector_registry.register("rest_api", RESTAPIConnector())
-        connector_registry.register("graphql", GraphQLConnector())
-        connector_registry.register("websocket", WebSocketConnector())
+        connector_registry.register(RESTAPIConnector(ConnectorConfig(
+            name="rest_api",
+            connector_type=ConnectorType.API,
+            source_config={}
+        )))
+        connector_registry.register(GraphQLConnector(ConnectorConfig(
+            name="graphql",
+            connector_type=ConnectorType.API,
+            source_config={}
+        )))
+        connector_registry.register(WebSocketConnector(ConnectorConfig(
+            name="websocket",
+            connector_type=ConnectorType.API,
+            source_config={}
+        )))
 
         logger.info("Content connectors initialized successfully")
 
@@ -155,8 +211,7 @@ class ConnectorInfo(BaseModel):
 @router.post("/discover", response_model=List[ContentItemResponse])
 async def discover_content(
     request: ContentDiscoveryRequest,
-    background_tasks: BackgroundTasks,
-    security_service: SecurityService = Depends()
+    background_tasks: BackgroundTasks
 ) -> List[ContentItemResponse]:
     """
     Discover content from multiple sources.
@@ -229,8 +284,7 @@ async def discover_content(
 
 @router.post("/fetch", response_model=ContentDataResponse)
 async def fetch_content(
-    request: ContentFetchRequest,
-    security_service: SecurityService = Depends()
+    request: ContentFetchRequest
 ) -> ContentDataResponse:
     """
     Fetch content data for a specific content item.
@@ -304,8 +358,7 @@ async def fetch_content(
 @router.post("/process", response_model=ProcessingResultResponse)
 async def process_content(
     request: ContentProcessingRequest,
-    background_tasks: BackgroundTasks,
-    security_service: SecurityService = Depends()
+    background_tasks: BackgroundTasks
 ) -> ProcessingResultResponse:
     """
     Process content using the content processing pipeline.
@@ -382,8 +435,7 @@ async def process_content(
 @router.post("/batch", response_model=List[ProcessingResultResponse])
 async def batch_process_content(
     request: BatchProcessingRequest,
-    background_tasks: BackgroundTasks,
-    security_service: SecurityService = Depends()
+    background_tasks: BackgroundTasks
 ) -> List[ProcessingResultResponse]:
     """
     Process multiple content items in batch.
@@ -510,8 +562,7 @@ async def get_pipeline_info() -> Dict[str, Any]:
 @router.post("/validate/{connector_type}")
 async def validate_connector(
     connector_type: str,
-    config: Dict[str, Any],
-    security_service: SecurityService = Depends()
+    config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Validate a connector configuration.

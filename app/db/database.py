@@ -1,9 +1,24 @@
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+try:
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+except ImportError:
+    # For older SQLAlchemy versions
+    from sqlalchemy.ext.asyncio import async_session as async_sessionmaker
 from sqlalchemy import MetaData
 import contextlib
 from typing import AsyncIterator
 from app.config import settings
+
+try:
+    from sqlalchemy.orm import DeclarativeBase
+
+    class Base(DeclarativeBase):
+        """Base class for all database models."""
+        pass
+except ImportError:
+    # For older SQLAlchemy versions
+    from sqlalchemy.ext.declarative import declarative_base
+    Base = declarative_base()
 
 
 # Create async engine
@@ -15,16 +30,7 @@ engine = create_async_engine(
 )
 
 # Create async session factory
-async_session_factory = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
-
-
-class Base(DeclarativeBase):
-    """Base class for all database models."""
-    pass
+async_session_factory = async_sessionmaker(engine)
 
 
 async def get_async_session() -> AsyncIterator[AsyncSession]:
@@ -37,6 +43,10 @@ async def get_async_session() -> AsyncIterator[AsyncSession]:
             raise
         finally:
             await session.close()
+
+
+# Alias for backward compatibility
+get_db = get_async_session
 
 
 @contextlib.asynccontextmanager

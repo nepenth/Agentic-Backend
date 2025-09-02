@@ -77,7 +77,7 @@ class ChatMessage(Base):
             "role": self.role,
             "content": self.content,
             "message_type": self.message_type,
-            "metadata": self.message_metadata,
+            "message_metadata": self.message_metadata,
             "token_count": self.token_count,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
