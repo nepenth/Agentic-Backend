@@ -9,14 +9,12 @@ The Agentic Backend provides multiple ways to explore and test the API endpoints
 
 The Swagger UI provides an interactive interface where you can:
 - ✅ View all available endpoints
-- ✅ See request/response schemas 
+- ✅ See request/response schemas
 - ✅ Test endpoints directly in the browser
 - ✅ Authenticate with API keys
 - ✅ View example requests and responses
 
-![Swagger UI Example](https://via.placeholder.com/800x400/2196F3/white?text=Swagger+UI+Interface)
-
-### ReDoc Documentation  
+### ReDoc Documentation
 **URL**: http://localhost:8000/redoc
 
 Alternative documentation interface with:
@@ -24,6 +22,319 @@ Alternative documentation interface with:
 - 🔍 Better for browsing and reading
 - 📋 Detailed schema information
 - 🏷️ Tag-based organization
+
+## 📋 **COMPLETE API ENDPOINT REFERENCE FOR TESTING**
+
+This comprehensive endpoint list serves as the foundation for testing all API functionality after recent backend changes. Each endpoint includes a brief description and authentication requirements.
+
+### 🔐 **Authentication & User Management**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/auth/login` | User login with form data (OAuth2 compatible) | ❌ | ✅ |
+| `POST` | `/api/v1/auth/login-json` | User login with JSON payload | ❌ | ✅ |
+| `GET` | `/api/v1/auth/me` | Get current authenticated user information | ✅ | ✅ |
+| `POST` | `/api/v1/auth/change-password` | Change current user's password | ✅ | ✅ |
+| `POST` | `/api/v1/auth/admin/change-password` | Admin change any user's password | ✅ | ✅ |
+
+### 🤖 **Agent Management**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/agents/create` | Create new agent (static or dynamic) with optional secrets | ✅ | ✅ |
+| `GET` | `/api/v1/agents` | List all agents with filtering options | ❌ | ✅ |
+| `GET` | `/api/v1/agents/{agent_id}` | Get specific agent details | ❌ | ✅ |
+| `PUT` | `/api/v1/agents/{agent_id}` | Update agent configuration | ✅ | ✅ |
+| `DELETE` | `/api/v1/agents/{agent_id}` | Delete agent | ✅ | ✅ |
+
+### ⚡ **Task Management**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/tasks/run` | Execute task with agent (supports static/dynamic agents) | ✅ | ✅ |
+| `GET` | `/api/v1/tasks` | List tasks with filtering | ❌ | ✅ |
+| `GET` | `/api/v1/tasks/{task_id}/status` | Get specific task execution status | ❌ | ✅ |
+| `DELETE` | `/api/v1/tasks/{task_id}` | Cancel running task | ✅ | ✅ |
+
+### 💬 **Chat System**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/chat/sessions` | Create new chat session | ✅ | ✅ |
+| `GET` | `/api/v1/chat/sessions` | List chat sessions | ❌ | ✅ |
+| `GET` | `/api/v1/chat/sessions/{session_id}` | Get chat session details | ❌ | ✅ |
+| `GET` | `/api/v1/chat/sessions/{session_id}/messages` | Get chat messages | ❌ | ✅ |
+| `POST` | `/api/v1/chat/sessions/{session_id}/messages` | Send message & get AI response with performance metrics | ✅ | ✅ |
+| `PUT` | `/api/v1/chat/sessions/{session_id}/status` | Update session status | ✅ | ✅ |
+| `GET` | `/api/v1/chat/sessions/{session_id}/stats` | Get session statistics | ❌ | ✅ |
+| `DELETE` | `/api/v1/chat/sessions/{session_id}` | Delete chat session | ✅ | ✅ |
+| `GET` | `/api/v1/chat/templates` | List available chat templates | ❌ | ✅ |
+| `GET` | `/api/v1/chat/models` | List available chat models | ❌ | ✅ |
+
+### 🔐 **Secrets Management**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/agents/{agent_id}/secrets` | Create new secret for agent | ✅ | ✅ |
+| `GET` | `/api/v1/agents/{agent_id}/secrets` | List all secrets for agent | ❌ | ✅ |
+| `GET` | `/api/v1/agents/{agent_id}/secrets/{secret_id}` | Get specific secret details | ✅ | ✅ |
+| `PUT` | `/api/v1/agents/{agent_id}/secrets/{secret_id}` | Update secret | ✅ | ✅ |
+| `DELETE` | `/api/v1/agents/{agent_id}/secrets/{secret_id}` | Delete secret (soft delete) | ✅ | ✅ |
+| `GET` | `/api/v1/agents/{agent_id}/secrets/{secret_key}/value` | Get decrypted secret value by key | ✅ | ✅ |
+
+### 🛡️ **Security Framework**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `GET` | `/api/v1/security/status` | Get current security status and metrics | ✅ | ✅ |
+| `POST` | `/api/v1/security/status` | Update security configuration | ✅ | ✅ |
+| `GET` | `/api/v1/security/agents/{agent_id}/report` | Get agent-specific security reports | ✅ | ✅ |
+| `POST` | `/api/v1/security/validate-tool-execution` | Pre-validate tool executions | ✅ | ✅ |
+| `GET` | `/api/v1/security/incidents` | List security incidents with filtering | ✅ | ✅ |
+| `POST` | `/api/v1/security/incidents/{incident_id}/resolve` | Resolve security incidents | ✅ | ✅ |
+| `GET` | `/api/v1/security/limits` | Get current security limits and constraints | ✅ | ✅ |
+| `GET` | `/api/v1/security/health` | Security service health check | ❌ | ✅ |
+
+### 📊 **System Monitoring**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `GET` | `/api/v1/health` | System health check | ❌ | ✅ |
+| `GET` | `/api/v1/ready` | Readiness check | ❌ | ✅ |
+| `GET` | `/api/v1/metrics` | Prometheus metrics | ✅ | ✅ |
+| `GET` | `/api/v1/system/metrics` | All system utilization metrics | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/cpu` | CPU metrics with temperature | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/memory` | Memory utilization metrics | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/disk` | Disk usage and I/O metrics | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/network` | Network I/O and speed metrics | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/gpu` | GPU utilization metrics (NVIDIA) | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/load` | System load average | ❌ | ✅ |
+| `GET` | `/api/v1/system/metrics/swap` | Swap memory utilization | ❌ | ✅ |
+| `GET` | `/api/v1/system/info` | System information (uptime, processes) | ❌ | ✅ |
+
+### 🤖 **Ollama Integration**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `GET` | `/api/v1/ollama/models` | List all available Ollama models with metadata | ❌ | ✅ |
+| `GET` | `/api/v1/ollama/models/names` | List available model names only | ❌ | ✅ |
+| `GET` | `/api/v1/ollama/health` | Check Ollama server health | ❌ | ✅ |
+| `POST` | `/api/v1/ollama/models/pull/{model_name}` | Pull/download a new model | ❌ | ✅ |
+
+### 🌐 **Agentic HTTP Client**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/http/request` | Make HTTP request with agentic features | ✅ | ✅ |
+| `GET` | `/api/v1/http/metrics` | Get HTTP client performance metrics | ✅ | ✅ |
+| `GET` | `/api/v1/http/requests/{request_id}` | Get specific request details | ✅ | ✅ |
+| `GET` | `/api/v1/http/health` | HTTP client health status | ❌ | ✅ |
+| `POST` | `/api/v1/http/stream-download` | Stream large file downloads | ✅ | ✅ |
+
+### 🧠 **Dynamic Model Selection**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `GET` | `/api/v1/models/available` | List available models with capabilities | ✅ | ✅ |
+| `POST` | `/api/v1/models/select` | Select optimal model for task | ✅ | ✅ |
+| `GET` | `/api/v1/models/performance` | Get model performance metrics | ✅ | ✅ |
+| `GET` | `/api/v1/models/{model_name}/stats` | Get specific model statistics | ✅ | ✅ |
+| `POST` | `/api/v1/models/refresh` | Refresh model registry | ✅ | ✅ |
+
+### 📋 **Multi-Modal Content Framework**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/content/process` | Process content with automatic type detection | ✅ | ✅ |
+| `GET` | `/api/v1/content/{id}` | Get processed content data | ✅ | ✅ |
+| `POST` | `/api/v1/content/batch` | Batch process multiple content items | ✅ | ✅ |
+| `GET` | `/api/v1/content/cache/stats` | Content cache statistics | ✅ | ✅ |
+
+### 👁️ **Vision AI Integration**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/vision/analyze` | Analyze image with multiple vision tasks | ✅ | ✅ |
+| `POST` | `/api/v1/vision/detect-objects` | Detect objects in image | ✅ | ✅ |
+| `POST` | `/api/v1/vision/caption` | Generate image caption | ✅ | ✅ |
+| `POST` | `/api/v1/vision/search` | Find similar images | ✅ | ✅ |
+| `POST` | `/api/v1/vision/ocr` | Extract text from image | ✅ | ✅ |
+| `GET` | `/api/v1/vision/models` | List available vision models | ✅ | ✅ |
+
+### 🎵 **Audio AI Integration**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/audio/transcribe` | Convert speech to text | ✅ | ✅ |
+| `POST` | `/api/v1/audio/identify-speaker` | Identify speakers in audio | ✅ | ✅ |
+| `POST` | `/api/v1/audio/analyze-emotion` | Detect emotions in speech | ✅ | ✅ |
+| `POST` | `/api/v1/audio/classify` | Classify audio content | ✅ | ✅ |
+| `POST` | `/api/v1/audio/analyze-music` | Extract musical features | ✅ | ✅ |
+| `GET` | `/api/v1/audio/models` | List available audio models | ✅ | ✅ |
+
+### 🔄 **Cross-Modal Processing**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/crossmodal/align` | Align text with images | ✅ | ✅ |
+| `POST` | `/api/v1/crossmodal/correlate` | Correlate audio with visual content | ✅ | ✅ |
+| `POST` | `/api/v1/crossmodal/search` | Multi-modal search | ✅ | ✅ |
+| `POST` | `/api/v1/crossmodal/fuse` | Fuse information from multiple modalities | ✅ | ✅ |
+| `GET` | `/api/v1/crossmodal/models` | List cross-modal models | ✅ | ✅ |
+
+### 🧠 **Semantic Processing**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/semantic/embed` | Generate embeddings for text | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/search` | Perform semantic search | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/cluster` | Cluster embeddings | ✅ | ✅ |
+| `GET` | `/api/v1/semantic/quality/{id}` | Get content quality score | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/chunk` | Intelligent text chunking | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/classify` | Content classification and tagging | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/extract-relations` | Entity and relationship extraction | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/score-importance` | ML-based content prioritization | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/detect-duplicates` | Semantic duplicate detection | ✅ | ✅ |
+| `POST` | `/api/v1/semantic/build-knowledge-graph` | Knowledge graph construction | ✅ | ✅ |
+
+### 📈 **Analytics & Intelligence**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/analytics/dashboard` | Get comprehensive analytics dashboard | ✅ | ✅ |
+| `GET` | `/api/v1/analytics/dashboard/summary` | Get dashboard summary metrics | ✅ | ✅ |
+| `POST` | `/api/v1/analytics/insights/content` | Get content performance insights | ✅ | ✅ |
+| `GET` | `/api/v1/analytics/insights/content/{content_id}` | Get insights for specific content | ✅ | ✅ |
+| `POST` | `/api/v1/analytics/trends` | Analyze content and usage trends | ✅ | ✅ |
+| `GET` | `/api/v1/analytics/trends/trending` | Get currently trending content | ✅ | ✅ |
+| `POST` | `/api/v1/analytics/performance` | Get detailed performance metrics | ✅ | ✅ |
+| `POST` | `/api/v1/analytics/search` | Get search analytics and insights | ✅ | ✅ |
+| `POST` | `/api/v1/analytics/health` | Get comprehensive system health | ✅ | ✅ |
+| `GET` | `/api/v1/analytics/health/quick` | Get quick system health status | ❌ | ✅ |
+| `GET` | `/api/v1/analytics/export/report` | Export comprehensive analytics report | ✅ | ✅ |
+| `GET` | `/api/v1/analytics/capabilities` | Get analytics capabilities | ❌ | ✅ |
+
+### 🎭 **Personalization**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/personalization/recommend` | Get personalized recommendations | ✅ | ✅ |
+| `POST` | `/api/v1/personalization/track-interaction` | Track user interaction | ✅ | ✅ |
+| `GET` | `/api/v1/personalization/insights/{user_id}` | Get user insights | ✅ | ✅ |
+| `POST` | `/api/v1/personalization/reset-profile` | Reset user profile | ✅ | ✅ |
+| `GET` | `/api/v1/personalization/health` | Get personalization health | ❌ | ✅ |
+| `GET` | `/api/v1/personalization/capabilities` | Get personalization capabilities | ❌ | ✅ |
+| `GET` | `/api/v1/personalization/stats` | Get personalization stats | ❌ | ✅ |
+| `POST` | `/api/v1/personalization/bulk-track` | Bulk track interactions | ✅ | ✅ |
+| `GET` | `/api/v1/personalization/recommend/trending` | Get trending personalized content | ✅ | ✅ |
+
+### 📈 **Trend Detection**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/trends/analyze` | Comprehensive trend analysis | ✅ | ✅ |
+| `POST` | `/api/v1/trends/predictive-insights` | Get predictive insights | ✅ | ✅ |
+| `POST` | `/api/v1/trends/anomalies` | Detect anomalies | ✅ | ✅ |
+| `GET` | `/api/v1/trends` | Get detected trends | ✅ | ✅ |
+| `GET` | `/api/v1/trends/{trend_id}` | Get trend details | ✅ | ✅ |
+| `GET` | `/api/v1/trends/forecast/{metric}` | Get metric forecast | ✅ | ✅ |
+| `GET` | `/api/v1/trends/health` | Get trends service health | ❌ | ✅ |
+| `GET` | `/api/v1/trends/capabilities` | Get trend detection capabilities | ❌ | ✅ |
+| `GET` | `/api/v1/trends/patterns/{pattern_type}` | Get trends by pattern type | ✅ | ✅ |
+| `POST` | `/api/v1/trends/analyze-metric` | Analyze specific metric | ✅ | ✅ |
+| `GET` | `/api/v1/trends/alerts` | Get trend alerts | ✅ | ✅ |
+
+### 🔍 **Search Analytics**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/search-analytics/report` | Generate search analytics report | ✅ | ✅ |
+| `POST` | `/api/v1/search-analytics/track-event` | Track search event | ✅ | ✅ |
+| `POST` | `/api/v1/search-analytics/suggestions` | Get search suggestions | ✅ | ✅ |
+| `POST` | `/api/v1/search-analytics/insights` | Get search insights | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/performance` | Get search performance | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/queries` | Get query analytics | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/user-behavior` | Get user search behavior | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/optimization` | Get optimization insights | ✅ | ✅ |
+| `POST` | `/api/v1/search-analytics/export` | Export search data | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/health` | Get search analytics health | ❌ | ✅ |
+| `GET` | `/api/v1/search-analytics/capabilities` | Get search analytics capabilities | ❌ | ✅ |
+| `GET` | `/api/v1/search-analytics/trends` | Get search trends | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/popular-queries` | Get popular queries | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/performance-summary` | Get performance summary | ✅ | ✅ |
+| `POST` | `/api/v1/search-analytics/bulk-track` | Bulk track search events | ✅ | ✅ |
+| `GET` | `/api/v1/search-analytics/real-time` | Get real-time search metrics | ✅ | ✅ |
+
+### 🔄 **Workflow Automation**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/workflows/definitions` | Create workflow definition | ✅ | ✅ |
+| `GET` | `/api/v1/workflows/definitions` | List workflow definitions | ✅ | ✅ |
+| `GET` | `/api/v1/workflows/definitions/{id}` | Get workflow definition | ✅ | ✅ |
+| `PUT` | `/api/v1/workflows/definitions/{id}` | Update workflow definition | ✅ | ✅ |
+| `DELETE` | `/api/v1/workflows/definitions/{id}` | Delete workflow definition | ✅ | ✅ |
+| `POST` | `/api/v1/workflows/execute` | Execute workflow | ✅ | ✅ |
+| `GET` | `/api/v1/workflows/executions` | List workflow executions | ✅ | ✅ |
+| `GET` | `/api/v1/workflows/executions/{id}` | Get execution status | ✅ | ✅ |
+| `POST` | `/api/v1/workflows/schedule` | Schedule workflow | ✅ | ✅ |
+| `DELETE` | `/api/v1/workflows/executions/{id}` | Cancel workflow execution | ✅ | ✅ |
+
+### 🔗 **Integration Layer**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/integration/webhooks/subscribe` | Subscribe to webhook events | ✅ | ✅ |
+| `DELETE` | `/api/v1/integration/webhooks/unsubscribe/{id}` | Unsubscribe from webhooks | ✅ | ✅ |
+| `GET` | `/api/v1/integration/webhooks` | List webhook subscriptions | ✅ | ✅ |
+| `POST` | `/api/v1/integration/queues/enqueue` | Add item to processing queue | ✅ | ✅ |
+| `GET` | `/api/v1/integration/queues/stats` | Get queue statistics | ✅ | ✅ |
+| `GET` | `/api/v1/integration/backends/stats` | Get backend service statistics | ✅ | ✅ |
+| `POST` | `/api/v1/integration/backends/register` | Register backend service | ✅ | ✅ |
+| `DELETE` | `/api/v1/integration/backends/unregister/{id}` | Unregister backend service | ✅ | ✅ |
+
+### 🌐 **Universal Content Connectors**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/content/discover` | Discover content from multiple sources | ✅ | ✅ |
+| `POST` | `/api/v1/content/connectors/web` | Web content discovery (RSS, scraping) | ✅ | ✅ |
+| `POST` | `/api/v1/content/connectors/social` | Social media content (Twitter, Reddit) | ✅ | ✅ |
+| `POST` | `/api/v1/content/connectors/communication` | Communication channels (Email, Slack) | ✅ | ✅ |
+| `POST` | `/api/v1/content/connectors/filesystem` | File system content (Local, Cloud) | ✅ | ✅ |
+
+### 🧠 **Knowledge Base**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/knowledge/items` | Create knowledge base item | ✅ | ✅ |
+| `GET` | `/api/v1/knowledge/items` | List knowledge base items | ✅ | ✅ |
+| `GET` | `/api/v1/knowledge/items/{id}` | Get specific knowledge item | ✅ | ✅ |
+| `PUT` | `/api/v1/knowledge/items/{id}` | Update knowledge item | ✅ | ✅ |
+| `DELETE` | `/api/v1/knowledge/items/{id}` | Delete knowledge item | ✅ | ✅ |
+| `POST` | `/api/v1/knowledge/search` | Search knowledge base | ✅ | ✅ |
+| `POST` | `/api/v1/knowledge/embeddings` | Generate embeddings | ✅ | ✅ |
+| `GET` | `/api/v1/knowledge/categories` | Get content categories | ✅ | ✅ |
+| `POST` | `/api/v1/knowledge/classify` | Classify content | ✅ | ✅ |
+
+### 📖 **Documentation**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `GET` | `/api/v1/docs/agent-creation` | Comprehensive agent creation guide | ❌ | ✅ |
+| `GET` | `/api/v1/docs/frontend-integration` | Frontend integration guide | ❌ | ✅ |
+| `GET` | `/api/v1/docs/examples` | Example configurations and usage | ❌ | ✅ |
+| `GET` | `/api/v1/agent-types/{type}/documentation` | Agent-specific documentation | ❌ | ✅ |
+
+### 📄 **Logging**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `GET` | `/api/v1/logs/{task_id}` | Get task logs | ❌ | ✅ |
+| `GET` | `/api/v1/logs/history` | Query historical logs | ❌ | ✅ |
+| `GET` | `/api/v1/logs/stream/{task_id}` | Server-sent events stream | ❌ | ✅ |
+
+### 🔄 **Learning & Adaptation**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/feedback/submit` | Submit user feedback for model improvement | ✅ | ✅ |
+| `GET` | `/api/v1/feedback/stats` | Get feedback statistics | ✅ | ✅ |
+| `POST` | `/api/v1/active-learning/select-samples` | Intelligent content selection for review | ✅ | ✅ |
+| `POST` | `/api/v1/fine-tuning/start` | Start model fine-tuning job | ✅ | ✅ |
+| `GET` | `/api/v1/fine-tuning/{job_id}/status` | Get fine-tuning job status | ✅ | ✅ |
+| `POST` | `/api/v1/performance/optimize` | Automated model selection and routing | ✅ | ✅ |
+| `GET` | `/api/v1/performance/metrics` | Get performance optimization metrics | ✅ | ✅ |
+
+### ⚡ **Quality Enhancement**
+| Method | Endpoint | Description | Auth Required | Status |
+|--------|----------|-------------|---------------|--------|
+| `POST` | `/api/v1/quality/enhance` | AI-powered content improvement | ✅ | ✅ |
+| `POST` | `/api/v1/quality/correct` | Automatic content correction | ✅ | ✅ |
+| `GET` | `/api/v1/quality/metrics` | Quality assessment metrics | ✅ | ✅ |
+
+### 🌐 **WebSocket Endpoints**
+| Protocol | Endpoint | Description | Auth Required | Status |
+|----------|----------|-------------|---------------|--------|
+| `WS` | `/ws/logs` | Real-time log streaming | ✅ | ✅ |
+| `WS` | `/ws/tasks/{task_id}` | Task-specific updates | ✅ | ✅ |
+| `WS` | `/ws/chat/{session_id}` | Chat session updates | ✅ | ✅ |
+
+---
 
 ## 🔐 User Authentication & Management
 
@@ -169,53 +480,6 @@ function useAuth() {
   };
 
   return { user, token, login, logout };
-}
-```
-
-#### Login Component
-```javascript
-import React, { useState } from 'react';
-import { useAuth } from './hooks/useAuth';
-
-function LoginForm() {
-  const [credentials, setCredentials] = useState({ username: '', password: '' });
-  const [error, setError] = useState('');
-  const { login } = useAuth();
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    const result = await login(credentials.username, credentials.password);
-    if (!result.success) {
-      setError(result.error);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <div>
-        <label>Username:</label>
-        <input
-          type="text"
-          value={credentials.username}
-          onChange={(e) => setCredentials({...credentials, username: e.target.value})}
-          required
-        />
-      </div>
-      <div>
-        <label>Password:</label>
-        <input
-          type="password"
-          value={credentials.password}
-          onChange={(e) => setCredentials({...credentials, password: e.target.value})}
-          required
-        />
-      </div>
-      {error && <div className="error">{error}</div>}
-      <button type="submit">Login</button>
-    </form>
-  );
 }
 ```
 
@@ -430,324 +694,7 @@ WS   /ws/logs                          # ✅ Real-time logs
 WS   /ws/tasks/{task_id}               # ✅ Task monitoring
 ```
 
-## 🌐 Agentic HTTP Client Framework
 
-The Agentic Backend includes a sophisticated HTTP client framework designed for resilient external API interactions. This framework provides enterprise-grade reliability with circuit breakers, rate limiting, and comprehensive observability.
-
-### Key Features
-- **Circuit Breaker Pattern**: Automatic failure detection and recovery
-- **Intelligent Retry Logic**: Exponential backoff with jitter
-- **Rate Limiting**: Built-in rate limit detection and compliance
-- **Request/Response Observability**: Comprehensive logging and metrics
-- **Authentication Support**: API keys, OAuth, JWT, and custom auth
-- **Streaming Support**: Large file downloads with progress tracking
-
-### HTTP Client Endpoints
-
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `POST` | `/api/v1/http/request` | Make HTTP request with agentic features | ✅ |
-| `GET` | `/api/v1/http/metrics` | Get HTTP client performance metrics | ✅ |
-| `GET` | `/api/v1/http/requests/{request_id}` | Get specific request details | ✅ |
-| `GET` | `/api/v1/http/health` | HTTP client health status | ❌ |
-
-### Making Agentic HTTP Requests
-
-**Basic Request:**
-```bash
-POST /api/v1/http/request
-{
-  "method": "GET",
-  "url": "https://api.twitter.com/2/bookmarks",
-  "headers": {
-    "Authorization": "Bearer YOUR_TOKEN",
-    "Content-Type": "application/json"
-  },
-  "timeout": 30,
-  "retry_config": {
-    "max_attempts": 3,
-    "backoff_factor": 2.0
-  },
-  "rate_limit": {
-    "requests_per_minute": 60
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "request_id": "req_1234567890",
-  "status_code": 200,
-  "headers": {
-    "content-type": "application/json",
-    "x-rate-limit-remaining": "59"
-  },
-  "content": "{\"data\": [...]}",
-  "response_time_ms": 1250,
-  "retry_count": 0,
-  "rate_limit_info": {
-    "remaining": 59,
-    "reset_time": "2024-01-01T12:01:00Z"
-  }
-}
-```
-
-### Streaming Downloads
-
-**Large File Download:**
-```bash
-POST /api/v1/http/stream-download
-{
-  "url": "https://example.com/large-file.zip",
-  "destination_path": "/tmp/downloads/file.zip",
-  "progress_callback_url": "http://localhost:8000/webhook/progress"
-}
-```
-
-### Frontend Integration
-
-**React Hook for HTTP Requests:**
-```javascript
-import { useState } from 'react';
-
-function useAgenticHttp() {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const makeRequest = async (config) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/v1/http/request', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(config)
-      });
-
-      const result = await response.json();
-
-      if (result.status_code >= 400) {
-        throw new Error(`HTTP ${result.status_code}: ${result.content}`);
-      }
-
-      return result;
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return { makeRequest, loading, error };
-}
-
-// Usage
-const { makeRequest, loading } = useAgenticHttp();
-
-const fetchBookmarks = async () => {
-  const result = await makeRequest({
-    method: 'GET',
-    url: 'https://api.twitter.com/2/bookmarks',
-    headers: { 'Authorization': `Bearer ${token}` },
-    retry_config: { max_attempts: 3 },
-    rate_limit: { requests_per_minute: 60 }
-  });
-
-  return JSON.parse(result.content);
-};
-```
-
-## 🧠 Dynamic Model Selection System
-
-The Agentic Backend provides intelligent AI model selection based on task requirements, performance metrics, and availability. This system ensures optimal model usage across different processing tasks.
-
-### Key Features
-- **Automatic Model Discovery**: Scans available Ollama models and their capabilities
-- **Task-Aware Selection**: Chooses optimal models based on content type and task
-- **Performance Tracking**: Monitors model performance for continuous optimization
-- **Fallback Mechanisms**: Graceful degradation when preferred models unavailable
-- **Model Versioning**: Tracks model versions and performance over time
-
-### Model Selection Endpoints
-
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `GET` | `/api/v1/models/available` | List all available models with capabilities | ✅ |
-| `POST` | `/api/v1/models/select` | Select optimal model for task | ✅ |
-| `GET` | `/api/v1/models/performance` | Get model performance metrics | ✅ |
-| `GET` | `/api/v1/models/{model_name}/stats` | Get specific model statistics | ✅ |
-| `POST` | `/api/v1/models/refresh` | Refresh model registry | ✅ |
-
-### Model Capabilities
-
-**Supported Model Types:**
-- **Text Models**: `llama2`, `codellama`, `mistral` - For text analysis, summarization, generation
-- **Vision Models**: `llava`, `moondream`, `bakllava` - For image analysis and captioning
-- **Audio Models**: `whisper` - For speech recognition and audio processing
-- **Embedding Models**: `nomic-embed-text`, `all-MiniLM` - For semantic search and similarity
-
-### Selecting Models for Tasks
-
-**Automatic Selection:**
-```bash
-POST /api/v1/models/select
-{
-  "task_type": "image_captioning",
-  "content_type": "image",
-  "priority": "quality",
-  "max_tokens": 500,
-  "requirements": {
-    "vision_capable": true,
-    "min_performance_score": 0.8
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "selected_model": "llava:13b",
-  "model_info": {
-    "name": "llava:13b",
-    "capabilities": ["vision", "text"],
-    "performance_score": 0.92,
-    "average_response_time_ms": 2450,
-    "supported_formats": ["jpeg", "png", "webp"]
-  },
-  "fallback_models": ["moondream:1.8b", "bakllava:7b"],
-  "selection_reason": "Best vision performance for image captioning"
-}
-```
-
-### Model Performance Tracking
-
-**Get Performance Metrics:**
-```bash
-GET /api/v1/models/performance?task_type=image_captioning&limit=10
-```
-
-**Response:**
-```json
-{
-  "metrics": [
-    {
-      "model_name": "llava:13b",
-      "task_type": "image_captioning",
-      "total_requests": 1250,
-      "success_rate": 0.98,
-      "average_response_time_ms": 2450,
-      "average_tokens_per_second": 45.2,
-      "performance_score": 0.92,
-      "last_updated": "2024-01-01T12:00:00Z"
-    },
-    {
-      "model_name": "moondream:1.8b",
-      "task_type": "image_captioning",
-      "total_requests": 890,
-      "success_rate": 0.95,
-      "average_response_time_ms": 1800,
-      "average_tokens_per_second": 38.1,
-      "performance_score": 0.87,
-      "last_updated": "2024-01-01T11:45:00Z"
-    }
-  ]
-}
-```
-
-### Frontend Integration
-
-**React Hook for Model Selection:**
-```javascript
-import { useState, useEffect } from 'react';
-
-function useModelSelection() {
-  const [availableModels, setAvailableModels] = useState([]);
-  const [selectedModel, setSelectedModel] = useState(null);
-
-  useEffect(() => {
-    fetchAvailableModels();
-  }, []);
-
-  const fetchAvailableModels = async () => {
-    const response = await fetch('/api/v1/models/available');
-    const data = await response.json();
-    setAvailableModels(data.models);
-  };
-
-  const selectModelForTask = async (taskConfig) => {
-    const response = await fetch('/api/v1/models/select', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(taskConfig)
-    });
-
-    const result = await response.json();
-    setSelectedModel(result);
-    return result;
-  };
-
-  return {
-    availableModels,
-    selectedModel,
-    selectModelForTask
-  };
-}
-
-// Usage in workflow creation
-function WorkflowConfigurator() {
-  const { selectModelForTask } = useModelSelection();
-
-  const configureVisionStep = async () => {
-    const modelSelection = await selectModelForTask({
-      task_type: 'image_analysis',
-      content_type: 'image',
-      priority: 'quality'
-    });
-
-    // Use selected model in workflow step
-    return {
-      tool: 'vision_processor',
-      config: {
-        model: modelSelection.selected_model,
-        fallback_models: modelSelection.fallback_models
-      }
-    };
-  };
-}
-```
-
-### Model Usage in Processing Results
-
-All processing results now include model usage information:
-
-```json
-{
-  "task_id": "task_123",
-  "status": "completed",
-  "result": {
-    "analysis": "Image shows a cat sitting on a windowsill...",
-    "confidence": 0.94
-  },
-  "model_usage": {
-    "primary_model": "llava:13b",
-    "model_version": "v1.5.1",
-    "processing_time_ms": 2450,
-    "tokens_used": 156,
-    "performance_score": 0.92
-  },
-  "processing_metadata": {
-    "http_requests_made": 1,
-    "external_api_calls": 0,
-    "cache_hits": 2
-  }
-}
-```
 
 ### 📋 **New API Endpoints (Phase 2)**
 
@@ -3592,242 +3539,12 @@ http POST localhost:8000/api/v1/agents/create Authorization:"Bearer api-key" nam
 - Check for proxy/firewall blocking WebSocket connections
 - Ensure the API server is running
 
-## 👁️ Vision AI Integration
-
-The Agentic Backend includes sophisticated **Vision AI Integration** that enables advanced image and visual content processing using state-of-the-art AI models.
-
-### Key Features
-- **Object Detection**: Identify and locate objects within images
-- **Image Captioning**: Generate descriptive captions for images
-- **Visual Search**: Find similar images using visual features
-- **Scene Understanding**: Analyze and describe visual scenes
-- **OCR Integration**: Extract text from images
-- **Quality Assessment**: Evaluate image quality and composition
-
-### Vision Processing Endpoints
-
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `POST` | `/api/v1/vision/analyze` | Analyze image with multiple vision tasks | ✅ |
-| `POST` | `/api/v1/vision/detect-objects` | Detect objects in image | ✅ |
-| `POST` | `/api/v1/vision/caption` | Generate image caption | ✅ |
-| `POST` | `/api/v1/vision/search` | Find similar images | ✅ |
-| `POST` | `/api/v1/vision/ocr` | Extract text from image | ✅ |
-| `GET` | `/api/v1/vision/models` | List available vision models | ✅ |
-
-### Image Analysis Example
-```bash
-POST /api/v1/vision/analyze
-{
-  "image_url": "https://example.com/image.jpg",
-  "tasks": ["objects", "caption", "scene"],
-  "model": "llava:13b",
-  "options": {
-    "max_objects": 10,
-    "confidence_threshold": 0.5
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "analysis_id": "vision_123456",
-  "image_url": "https://example.com/image.jpg",
-  "results": {
-    "objects": [
-      {
-        "label": "cat",
-        "confidence": 0.94,
-        "bbox": [120, 80, 280, 220]
-      },
-      {
-        "label": "chair",
-        "confidence": 0.87,
-        "bbox": [50, 150, 150, 280]
-      }
-    ],
-    "caption": "A cat sitting on a chair in a living room",
-    "scene": "indoor domestic setting",
-    "quality_score": 0.89
-  },
-  "processing_time_ms": 2450,
-  "model_used": "llava:13b"
-}
-```
-
-### Frontend Integration
-```javascript
-// React Hook for Vision Analysis
-function useVisionAnalysis() {
-  const [analyzing, setAnalyzing] = useState(false);
-
-  const analyzeImage = async (imageFile, tasks = ['objects', 'caption']) => {
-    setAnalyzing(true);
-    try {
-      const formData = new FormData();
-      formData.append('image', imageFile);
-      formData.append('tasks', JSON.stringify(tasks));
-
-      const response = await fetch('/api/v1/vision/analyze', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      const result = await response.json();
-      return result;
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  return { analyzeImage, analyzing };
-}
-```
 
 ---
 
-## 🎵 Audio AI Integration
-
-The Agentic Backend provides comprehensive **Audio AI Integration** for processing speech, music, and audio content using advanced AI models.
-
-### Key Features
-- **Speech Recognition**: Convert speech to text with high accuracy
-- **Speaker Identification**: Identify speakers in audio recordings
-- **Emotion Detection**: Analyze emotional content in speech
-- **Audio Classification**: Categorize audio by type and content
-- **Music Analysis**: Extract musical features and metadata
-- **Noise Reduction**: Improve audio quality for better processing
-
-### Audio Processing Endpoints
-
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `POST` | `/api/v1/audio/transcribe` | Convert speech to text | ✅ |
-| `POST` | `/api/v1/audio/identify-speaker` | Identify speakers in audio | ✅ |
-| `POST` | `/api/v1/audio/analyze-emotion` | Detect emotions in speech | ✅ |
-| `POST` | `/api/v1/audio/classify` | Classify audio content | ✅ |
-| `POST` | `/api/v1/audio/analyze-music` | Extract musical features | ✅ |
-| `GET` | `/api/v1/audio/models` | List available audio models | ✅ |
-
-### Speech Transcription Example
-```bash
-POST /api/v1/audio/transcribe
-{
-  "audio_url": "https://example.com/audio.mp3",
-  "language": "en",
-  "model": "whisper-large-v3",
-  "options": {
-    "timestamps": true,
-    "max_speakers": 2
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "transcription_id": "audio_123456",
-  "audio_url": "https://example.com/audio.mp3",
-  "transcription": {
-    "text": "Hello, this is a sample audio recording for testing purposes.",
-    "segments": [
-      {
-        "start": 0.0,
-        "end": 2.5,
-        "text": "Hello, this is a sample audio recording",
-        "confidence": 0.98
-      },
-      {
-        "start": 2.5,
-        "end": 4.2,
-        "text": "for testing purposes.",
-        "confidence": 0.95
-      }
-    ],
-    "language": "en",
-    "duration": 4.2
-  },
-  "speakers": [
-    {
-      "speaker_id": "speaker_1",
-      "segments": [[0.0, 4.2]],
-      "confidence": 0.92
-    }
-  ],
-  "processing_time_ms": 3200,
-  "model_used": "whisper-large-v3"
-}
-```
 
 ---
 
-## 🔄 Cross-Modal Processing
-
-The Agentic Backend enables **Cross-Modal Processing** that combines information from multiple modalities (text, image, audio) to provide richer understanding and analysis.
-
-### Key Features
-- **Text-Image Alignment**: Connect textual descriptions with visual content
-- **Audio-Visual Correlation**: Link audio content with visual information
-- **Multi-Modal Search**: Search across different content types simultaneously
-- **Content Fusion**: Combine insights from multiple modalities
-- **Contextual Understanding**: Enhanced comprehension through modal integration
-
-### Cross-Modal Endpoints
-
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `POST` | `/api/v1/crossmodal/align` | Align text with images | ✅ |
-| `POST` | `/api/v1/crossmodal/correlate` | Correlate audio with visual content | ✅ |
-| `POST` | `/api/v1/crossmodal/search` | Multi-modal search | ✅ |
-| `POST` | `/api/v1/crossmodal/fuse` | Fuse information from multiple modalities | ✅ |
-| `GET` | `/api/v1/crossmodal/models` | List cross-modal models | ✅ |
-
-### Multi-Modal Search Example
-```bash
-POST /api/v1/crossmodal/search
-{
-  "query": "A cat playing with a ball",
-  "modalities": ["text", "image", "audio"],
-  "search_type": "semantic",
-  "limit": 10
-}
-```
-
-**Response:**
-```json
-{
-  "search_id": "crossmodal_123456",
-  "query": "A cat playing with a ball",
-  "results": [
-    {
-      "content_id": "content_001",
-      "modality": "image",
-      "similarity_score": 0.94,
-      "matched_aspects": ["visual_similarity", "semantic_match"],
-      "metadata": {
-        "caption": "A tabby cat batting at a red ball",
-        "objects": ["cat", "ball"],
-        "scene": "indoor play area"
-      }
-    },
-    {
-      "content_id": "content_002",
-      "modality": "text",
-      "similarity_score": 0.87,
-      "matched_aspects": ["semantic_match"],
-      "metadata": {
-        "title": "Cat Toy Reviews",
-        "excerpt": "The interactive ball toy kept my cat entertained for hours..."
-      }
-    }
-  ],
-  "processing_time_ms": 1800
-}
-```
 
 ---
 
@@ -3993,1082 +3710,3 @@ POST /api/v1/performance/optimize
 ```
 
 ---
-
-## 🔗 Universal Content Connector Framework (Phase 2)
-
-The Agentic Backend now includes a comprehensive **Universal Content Connector Framework** that enables seamless integration with diverse data sources and content processing capabilities. This framework provides a unified interface for discovering, fetching, and processing content from web sources, social media platforms, communication channels, file systems, and APIs.
-
-### 🎯 Key Features
-
-- **🔌 Universal Interface**: Single, consistent API for all content sources
-- **📊 Multi-Modal Processing**: Support for text, images, audio, video, and structured data
-- **🔄 Intelligent Caching**: Smart caching with invalidation strategies
-- **⚡ Parallel Processing**: Concurrent content discovery and processing
-- **🛡️ Robust Validation**: Comprehensive content validation and error handling
-- **📈 Performance Monitoring**: Detailed metrics and observability
-- **🔧 Extensible Architecture**: Easy addition of new connectors and processors
-
-### 📋 Framework Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CONTENT CONNECTOR FRAMEWORK               │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┬─────────────┬─────────────┬─────────────┐  │
-│  │   WEB       │  SOCIAL     │  COMM       │  FILE       │  │
-│  │ CONNECTORS  │  MEDIA      │  CHANNELS   │  SYSTEMS    │  │
-│  │             │  CONNECTORS │             │             │  │
-│  └─────────────┴─────────────┴─────────────┴─────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┬─────────────┬─────────────┬─────────────┐  │
-│  │   TEXT      │   IMAGE     │   AUDIO     │ STRUCTURED  │  │
-│  │ PROCESSORS  │ PROCESSORS  │ PROCESSORS  │ PROCESSORS  │  │
-│  └─────────────┴─────────────┴─────────────┴─────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│                    SEMANTIC PROCESSING ENGINE                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 🌐 Content Connectors
-
-#### 1. **Web Content Connectors**
-**File**: `app/connectors/web.py`
-
-**Supported Sources:**
-- RSS/Atom feeds
-- Web scraping (BeautifulSoup integration)
-- REST API endpoints
-- Dynamic web content
-
-**Key Features:**
-- Intelligent content extraction
-- Rate limiting and retry logic
-- JavaScript rendering support
-- Content deduplication
-
-**Example Usage:**
-```python
-from app.connectors.web import RSSConnector, WebScraperConnector
-
-# RSS Feed Discovery
-rss_connector = RSSConnector()
-items = await rss_connector.discover({
-    "feed_url": "https://example.com/feed.xml",
-    "max_items": 50
-})
-
-# Web Scraping
-scraper = WebScraperConnector()
-content = await scraper.fetch({
-    "url": "https://example.com/article",
-    "selectors": {
-        "title": "h1.article-title",
-        "content": ".article-content"
-    }
-})
-```
-
-#### 2. **Social Media Connectors**
-**File**: `app/connectors/social.py`
-
-**Supported Platforms:**
-- Twitter/X API
-- Reddit API
-- LinkedIn API
-- Instagram Basic Display API
-
-**Key Features:**
-- OAuth 2.0 authentication
-- Rate limit management
-- Content filtering and search
-- Real-time streaming support
-
-**Example Usage:**
-```python
-from app.connectors.social import TwitterConnector, RedditConnector
-
-# Twitter Integration
-twitter = TwitterConnector()
-bookmarks = await twitter.discover({
-    "api_credentials": {...},
-    "folder_url": "https://x.com/username/bookmarks",
-    "max_items": 100
-})
-
-# Reddit Content
-reddit = RedditConnector()
-posts = await reddit.discover({
-    "subreddit": "technology",
-    "sort": "hot",
-    "limit": 25
-})
-```
-
-#### 3. **Communication Connectors**
-**File**: `app/connectors/communication.py`
-
-**Supported Platforms:**
-- Email (IMAP/POP3/SMTP)
-- Slack API
-- Discord API
-- Microsoft Teams
-
-**Key Features:**
-- Secure authentication
-- Message threading support
-- Attachment handling
-- Real-time message monitoring
-
-**Example Usage:**
-```python
-from app.connectors.communication import EmailConnector, SlackConnector
-
-# Email Processing
-email_conn = EmailConnector()
-messages = await email_conn.discover({
-    "imap_server": "imap.gmail.com",
-    "credentials": {...},
-    "folder": "INBOX",
-    "max_messages": 50
-})
-
-# Slack Integration
-slack = SlackConnector()
-messages = await slack.discover({
-    "workspace": "myworkspace",
-    "channel": "#general",
-    "token": "xoxb-..."
-})
-```
-
-#### 4. **File System Connectors**
-**File**: `app/connectors/filesystem.py`
-
-**Supported Storage:**
-- Local file systems
-- AWS S3 buckets
-- Google Cloud Storage
-- Azure Blob Storage
-- FTP/SFTP servers
-
-**Key Features:**
-- Recursive directory scanning
-- File type detection
-- Metadata extraction
-- Cloud storage integration
-
-**Example Usage:**
-```python
-from app.connectors.filesystem import LocalFileSystemConnector, S3Connector
-
-# Local Files
-local_fs = LocalFileSystemConnector()
-files = await local_fs.discover({
-    "directory": "/path/to/documents",
-    "recursive": True,
-    "file_patterns": ["*.pdf", "*.docx"]
-})
-
-# Cloud Storage
-s3_conn = S3Connector()
-objects = await s3_conn.discover({
-    "bucket_name": "my-documents",
-    "prefix": "reports/",
-    "max_keys": 100
-})
-```
-
-#### 5. **API Connectors**
-**File**: `app/connectors/api.py`
-
-**Supported APIs:**
-- REST APIs
-- GraphQL APIs
-- WebSocket APIs
-- Generic HTTP APIs
-
-**Key Features:**
-- Automatic schema discovery
-- Query optimization
-- Streaming support
-- Authentication handling
-
-**Example Usage:**
-```python
-from app.connectors.api import RESTAPIConnector, GraphQLConnector
-
-# REST API Integration
-rest_conn = RESTAPIConnector()
-data = await rest_conn.discover({
-    "endpoints": [{
-        "url": "https://api.example.com/posts",
-        "method": "GET",
-        "headers": {"Authorization": "Bearer token"}
-    }]
-})
-
-# GraphQL API
-gql_conn = GraphQLConnector()
-results = await gql_conn.discover({
-    "endpoint": "https://api.example.com/graphql",
-    "queries": [{
-        "query": "query { posts { id title content } }",
-        "variables": {"limit": 10}
-    }]
-})
-```
-
-### ⚙️ Content Processing Pipeline
-
-#### Text Processing
-**Capabilities:**
-- Summarization (extractive and abstractive)
-- Entity extraction (persons, organizations, locations)
-- Sentiment analysis
-- Keyword extraction
-- Language detection
-- Readability scoring
-
-**Example:**
-```python
-from app.processors.content_pipeline import ContentProcessingPipeline
-
-pipeline = ContentProcessingPipeline()
-result = await pipeline.process_content(content_data, {
-    "operations": ["summarize", "extract_entities", "sentiment_analysis"]
-})
-
-print(f"Summary: {result.processed_content['summary']['summary']}")
-print(f"Sentiment: {result.processed_content['sentiment']['sentiment']}")
-```
-
-#### Image Processing
-**Capabilities:**
-- Image description generation
-- OCR (text extraction)
-- Object detection
-- Color analysis
-- Scene classification
-
-#### Audio Processing
-**Capabilities:**
-- Speech-to-text transcription
-- Speaker identification
-- Emotion analysis
-- Audio feature extraction
-
-#### Structured Data Processing
-**Capabilities:**
-- Schema validation
-- Data transformation
-- Enrichment with metadata
-- Statistical analysis
-
-### 🔧 Framework Integration
-
-#### Content Discovery Workflow
-```python
-from app.connectors.base import ContentConnectorRegistry
-
-# Register connectors
-registry = ContentConnectorRegistry()
-registry.register("web", RSSConnector())
-registry.register("social", TwitterConnector())
-registry.register("filesystem", LocalFileSystemConnector())
-
-# Discover content from multiple sources
-sources = [
-    {"type": "web", "config": {"feed_url": "https://example.com/rss"}},
-    {"type": "social", "config": {"platform": "twitter", "username": "news"}},
-    {"type": "filesystem", "config": {"directory": "/data/documents"}}
-]
-
-all_content = []
-for source in sources:
-    connector = registry.get_connector(source["type"])
-    items = await connector.discover(source["config"])
-    all_content.extend(items)
-```
-
-#### Processing Pipeline Integration
-```python
-from app.processors.content_pipeline import ContentProcessingPipeline
-
-# Initialize pipeline
-pipeline = ContentProcessingPipeline({
-    "text_processor": {
-        "operations": ["summarize", "extract_entities"]
-    },
-    "image_processor": {
-        "operations": ["describe", "detect_objects"]
-    }
-})
-
-# Process discovered content
-processed_results = []
-for content_item in all_content:
-    content_data = await connector.fetch(content_item)
-    result = await pipeline.process_content(content_data, {})
-    processed_results.append(result)
-```
-
-### 📊 Performance & Monitoring
-
-#### Metrics Collection
-- Content discovery rates
-- Processing throughput
-- Error rates by connector type
-- Cache hit/miss ratios
-- API rate limit usage
-
-#### Health Monitoring
-```python
-# Check connector health
-health_status = await connector.validate_connection()
-
-# Monitor processing performance
-metrics = pipeline.get_processing_metrics()
-
-# Cache statistics
-cache_stats = connector.get_cache_statistics()
-```
-
-### 🔒 Security Features
-
-#### Authentication & Authorization
-- Secure credential management
-- Token rotation support
-- Permission-based access control
-- Audit trail logging
-
-#### Data Protection
-- Content encryption at rest
-- Secure API communication
-- Input validation and sanitization
-- Rate limiting and abuse prevention
-
-### 🚀 Getting Started
-
-#### Basic Usage Example
-```python
-from app.connectors.web import RSSConnector
-from app.processors.content_pipeline import ContentProcessingPipeline
-
-# 1. Set up connector
-connector = RSSConnector()
-
-# 2. Discover content
-items = await connector.discover({
-    "feed_url": "https://example.com/feed.xml",
-    "max_items": 10
-})
-
-# 3. Process content
-pipeline = ContentProcessingPipeline()
-for item in items:
-    content_data = await connector.fetch(item)
-    result = await pipeline.process_content(content_data, {
-        "operations": ["summarize", "extract_entities"]
-    })
-    print(f"Processed: {result.processed_content['summary']['summary']}")
-```
-
-#### Advanced Configuration
-```python
-# Custom connector configuration
-config = {
-    "connectors": {
-        "web": {
-            "timeout": 30,
-            "retry_attempts": 3,
-            "rate_limit": 100
-        },
-        "social": {
-            "credentials": {...},
-            "rate_limit": 300
-        }
-    },
-    "processing": {
-        "batch_size": 10,
-        "parallel_processing": True,
-        "cache_enabled": True
-    }
-}
-
-# Initialize with configuration
-framework = ContentConnectorFramework(config)
-```
-
-### 📈 Scaling & Performance
-
-#### Horizontal Scaling
-- Load balancing across multiple instances
-- Distributed caching with Redis
-- Database connection pooling
-- Async processing with Celery
-
-#### Optimization Strategies
-- Intelligent caching policies
-- Content deduplication
-- Parallel processing pipelines
-- Resource usage monitoring
-
-### 🔧 Extensibility
-
-#### Adding New Connectors
-```python
-from app.connectors.base import ContentConnector
-
-class CustomConnector(ContentConnector):
-    async def discover(self, source_config):
-        # Implement discovery logic
-        pass
-
-    async def fetch(self, content_ref):
-        # Implement fetch logic
-        pass
-
-    async def validate(self, content):
-        # Implement validation logic
-        pass
-
-# Register the connector
-registry.register("custom", CustomConnector())
-```
-
-#### Custom Processors
-```python
-from app.processors.content_pipeline import ContentProcessor
-
-class CustomProcessor(ContentProcessor):
-    def get_supported_content_types(self):
-        return [ContentType.CUSTOM]
-
-    async def process(self, content_data, context):
-        # Implement custom processing logic
-        pass
-```
-
-### 📚 API Endpoints
-
-#### Content Discovery
-```bash
-# Discover content from multiple sources
-POST /api/v1/content/discover
-{
-  "sources": [
-    {
-      "type": "web",
-      "config": {"feed_url": "https://example.com/rss"}
-    },
-    {
-      "type": "social",
-      "config": {"platform": "twitter", "query": "#AI"}
-    }
-  ]
-}
-```
-
-#### Content Processing
-```bash
-# Process content with specific operations
-POST /api/v1/content/process
-{
-  "content_id": "item_123",
-  "operations": ["summarize", "extract_entities"],
-  "options": {
-    "language": "en",
-    "max_length": 500
-  }
-}
-```
-
-#### Batch Processing
-```bash
-# Process multiple content items
-POST /api/v1/content/batch
-{
-  "items": ["item_1", "item_2", "item_3"],
-  "pipeline_config": {
-    "parallel": true,
-    "operations": ["summarize", "classify"]
-  }
-}
-```
-
-### 🎯 Frontend Integration Quick Start
-
-**For External API Integration:**
-```javascript
-// Use agentic HTTP client for reliable API calls
-const response = await fetch('/api/v1/http/request', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    method: 'GET',
-    url: 'https://api.twitter.com/2/bookmarks',
-    headers: { 'Authorization': `Bearer ${token}` },
-    retry_config: { max_attempts: 3 },
-    rate_limit: { requests_per_minute: 60 }
-  })
-});
-```
-
-**For Content Discovery:**
-```javascript
-// Discover content from multiple sources
-const discoveryResponse = await fetch('/api/v1/content/discover', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    sources: [
-      {
-        type: 'web',
-        config: { feed_url: 'https://example.com/rss' }
-      },
-      {
-        type: 'social',
-        config: { platform: 'twitter', query: '#AI' }
-      }
-    ]
-  })
-});
-```
-
-**For AI Model Selection:**
-```javascript
-// Get optimal model for your task
-const modelSelection = await fetch('/api/v1/models/select', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    task_type: 'image_analysis',
-    content_type: 'image',
-    priority: 'quality'
-  })
-});
-```
-
-**Key New Features:**
-- **🔄 Agentic HTTP Client**: Enterprise-grade reliability for external API calls
-- **🧠 Dynamic Model Selection**: Intelligent AI model selection based on task requirements
-- **📊 Performance Tracking**: Monitor model and HTTP performance for optimization
-- **📈 Enhanced Observability**: Comprehensive metrics and logging for all operations
-- **🔗 Universal Content Connectors**: Unified interface for diverse data sources
-- **⚙️ Content Processing Pipeline**: Multi-modal content processing capabilities
-- **👁️ Vision AI Integration**: Advanced image analysis with object detection and captioning
-- **🎵 Audio AI Integration**: Speech recognition and audio processing capabilities
-- **🔄 Cross-Modal Processing**: Unified search and analysis across text, image, and audio
-- **🧠 Semantic Understanding**: Content classification, relationship extraction, and importance scoring
-- **📈 Learning & Adaptation**: Continuous model improvement through feedback loops
-- **🎯 Active Learning**: Intelligent content selection for manual review and training
-- **🔧 Model Fine-tuning**: Domain-specific model adaptation and optimization
-- **⚡ Performance Optimization**: Automated model selection and intelligent routing
-
-### 📚 Documentation System Ready
-
-The comprehensive documentation system is now available to help you:
-- **Create agents** with step-by-step guides
-- **Integrate frontends** with React hooks and examples
-- **Understand agent capabilities** through auto-generated docs
-- **Follow best practices** for development and deployment
-- **Connect to diverse data sources** using the universal connector framework
-
-**Start exploring**: http://localhost:8000/api/v1/docs/agent-creation
-
-### 🚀 Workflow Development Guide
-
-A comprehensive **WORKFLOW_DEVELOPMENT_GUIDE.md** is now available with:
-
-#### 📧 Email Processing Workflow Example
-- **Complete implementation** of IMAP email processing agent
-- **LLM integration** for email analysis and prioritization
-- **Task management** system for follow-ups
-- **Frontend dashboard** with React components
-- **Database schema** for workflow data
-
-#### 🛠️ Development Resources
-- **Agent creation patterns** and best practices
-- **Tool development** for custom integrations
-- **Frontend integration** examples and hooks
-- **WebSocket usage** for real-time updates
-- **Security considerations** for agent workflows
-- **Content connector integration** examples
-
-#### 📁 Example Files Included
-```
-examples/
-├── email_analyzer_agent.json      # Agent configuration
-├── EmailWorkflowDashboard.jsx     # React dashboard component
-├── EmailWorkflowDashboard.css     # Component styling
-└── README.md                      # Implementation guide
-```
-
-#### **Frontend Integration Examples**
-```javascript
-// Analytics Dashboard Integration
-const dashboard = await fetch('/api/v1/analytics/dashboard', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ time_period_days: 30 })
-});
-
-// Personalization Integration
-const recommendations = await fetch('/api/v1/personalization/recommend', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ user_id: 'user123', limit: 10 })
-});
-
-// Real-time Search Analytics
-const searchInsights = await fetch('/api/v1/search-analytics/real-time');
-```
-
-### 📊 **Monitoring & Maintenance**
-
-#### **Health Monitoring**
-- **Service Health Checks**: Automated health monitoring for all services
-- **Performance Metrics**: Real-time performance monitoring and alerting
-- **Error Tracking**: Comprehensive error logging and alerting
-- **Resource Usage**: Monitoring of CPU, memory, and storage usage
-
-#### **Maintenance Features**
-- **Automated Backups**: Regular backups of analytics data
-- **Data Cleanup**: Automated cleanup of old analytics data
-- **Performance Tuning**: Self-tuning based on usage patterns
-- **Version Updates**: Seamless updates with backward compatibility
-
-**🚀 Ready for Production Use:**
-The Analytics & Intelligence platform is now fully operational and ready to provide:
-- Real-time analytics dashboards
-- Personalized user experiences
-- Predictive trend insights
-- Comprehensive search analytics
-- Intelligent content recommendations
-
-**Frontend Integration Quick Start:**
-```javascript
-// Get comprehensive analytics dashboard
-const dashboard = await fetch('/api/v1/analytics/dashboard', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ time_period_days: 30 })
-});
-
-// Get personalized recommendations
-const recommendations = await fetch('/api/v1/personalization/recommend', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ user_id: 'user123', limit: 10 })
-});
-
-// Track search events for analytics
-await fetch('/api/v1/search-analytics/track-event', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    query: 'machine learning',
-    results_count: 25,
-    response_time_ms: 450
-  })
-});
-```
-
-#### **1. Workflow Automation Engine** (`app/services/workflow_automation_service.py`)
-- **Intelligent Workflow Orchestration**: DAG-based execution with dependency management
-- **Scheduled Workflows**: Time-based and event-triggered execution
-- **Conditional Logic**: Rule-based workflow branching and decision making
-- **Error Recovery**: Automatic retry and alternative path execution
-- **Resource Optimization**: Intelligent resource allocation and scaling
-- **Real-time Monitoring**: Comprehensive workflow execution tracking
-
-#### **2. Integration Layer Service** (`app/services/integration_layer_service.py`)
-- **API Gateway**: Unified access to all workflow capabilities with rate limiting
-- **Webhook Support**: Real-time notifications and external integrations
-- **Queue Management**: Asynchronous processing with priority queues
-- **Load Balancing**: Intelligent distribution of processing workloads
-- **Event-Driven Architecture**: Pub/sub system for loose coupling
-
-#### **3. Workflow Definition Management**
-- **Complex Workflow Creation**: Support for multi-step workflows with dependencies
-- **Dynamic Scheduling**: Cron expressions and interval-based scheduling
-- **Event Triggers**: Workflow execution triggered by system events
-- **Priority Management**: Workflow prioritization (LOW, NORMAL, HIGH, CRITICAL)
-- **Resource Requirements**: Automatic resource allocation based on workflow needs
-
-#### **4. Advanced Execution Features**
-- **Parallel Processing**: Concurrent execution of independent workflow steps
-- **Conditional Branching**: Dynamic workflow paths based on step results
-- **Error Handling**: Comprehensive retry logic with exponential backoff
-- **State Persistence**: Workflow state recovery after system restarts
-- **Performance Monitoring**: Real-time execution metrics and health checks
-
-### 📊 **New API Endpoints Summary**
-
-**Workflow Automation (18 endpoints):**
-- Complete workflow lifecycle management (create, update, delete, execute)
-- Workflow scheduling and event triggering
-- Execution monitoring and status tracking
-- Conditional logic evaluation and testing
-- Resource optimization and health monitoring
-
-**Integration Layer (20 endpoints):**
-- API gateway management and routing
-- Webhook subscription and management
-- Queue management with priority support
-- Load balancer statistics and control
-- Real-time event triggering and monitoring
-
-### 🏗️ **Architecture & Design**
-
-#### **Workflow Automation Architecture**
-```
-┌─────────────────────────────────────────────────────────────┐
-│                WORKFLOW AUTOMATION ENGINE                    │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┬─────────────┬─────────────┬─────────────┐  │
-│  │ WORKFLOW    │ SCHEDULER   │ EXECUTOR    │ MONITOR     │  │
-│  │ DEFINITIONS │             │             │             │  │
-│  └─────────────┴─────────────┴─────────────┴─────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │            INTELLIGENT RESOURCE MANAGEMENT          │    │
-│  │  ┌─────────────┬─────────────┬─────────────┐        │    │
-│  │  │ CONDITIONAL │ ERROR       │ RESOURCE    │        │    │
-│  │  │ LOGIC       │ RECOVERY    │ OPTIMIZATION│        │    │
-│  │  └─────────────┴─────────────┴─────────────┘        │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-#### **Integration Layer Architecture**
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    INTEGRATION LAYER                        │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┬─────────────┬─────────────┬─────────────┐  │
-│  │ API GATEWAY │ WEBHOOKS    │ QUEUES      │ LOAD        │  │
-│  │             │ MANAGER     │ MANAGER     │ BALANCER    │  │
-│  └─────────────┴─────────────┴─────────────┴─────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │            EVENT-DRIVEN PROCESSING                 │    │
-│  │  ┌─────────────┬─────────────┬─────────────┐        │    │
-│  │  │ PUB/SUB     │ ASYNC       │ HEALTH       │        │    │
-│  │  │ SYSTEM      │ PROCESSING  │ MONITORING   │        │    │
-│  │  └─────────────┴─────────────┴─────────────┘        │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 📈 **Performance & Scalability**
-
-#### **Performance Metrics**
-- **Workflow Execution**: <5 seconds average execution time for simple workflows
-- **Concurrent Workflows**: Support for 50+ concurrent workflow executions
-- **Queue Processing**: <1 second average queue processing time
-- **API Gateway**: <100ms average response time with rate limiting
-- **Load Balancing**: Automatic distribution with <10% performance variance
-
-#### **Scalability Features**
-- **Horizontal Scaling**: Services can be independently scaled
-- **Distributed State**: Redis-backed distributed state management
-- **Asynchronous Processing**: Non-blocking workflow execution
-- **Resource Pooling**: Intelligent resource allocation and reuse
-- **Auto-scaling**: Dynamic scaling based on workload patterns
-
-### 🔄 **Workflow Execution Flow**
-
-#### **Example: Data Processing Workflow**
-```mermaid
-graph TD
-    A[Schedule Trigger] --> B[Validate Input Data]
-    B --> C{Check Data Quality}
-    C -->|High Quality| D[Process with AI Model]
-    C -->|Low Quality| E[Apply Data Cleaning]
-    E --> D
-    D --> F[Generate Report]
-    F --> G{Send Notifications}
-    G -->|Success| H[Mark Complete]
-    G -->|Failed| I[Retry Notification]
-    I --> G
-    H --> J[Cleanup Resources]
-```
-
-#### **Conditional Logic Example**
-```json
-{
-  "step_id": "quality_check",
-  "conditions": [
-    {
-      "type": "data_quality",
-      "field": "confidence_score",
-      "operator": "greater_than",
-      "value": 0.8
-    },
-    {
-      "type": "resource_check",
-      "field": "available_memory_gb",
-      "operator": "greater_than",
-      "value": 2.0
-    }
-  ]
-}
-```
-
-### 🌐 **Integration Capabilities**
-
-#### **Webhook Integration**
-```javascript
-// Subscribe to workflow events
-const subscription = await fetch('/api/v1/integration/webhooks/subscribe', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    url: 'https://myapp.com/webhook',
-    events: ['workflow.completed', 'workflow.failed'],
-    headers: { 'Authorization': 'Bearer token123' }
-  })
-});
-
-// Receive webhook notifications
-app.post('/webhook', (req, res) => {
-  const { event, data } = req.body;
-
-  if (event === 'workflow.completed') {
-    console.log('Workflow completed:', data.execution_id);
-    // Handle completion logic
-  }
-});
-```
-
-#### **Queue Processing Integration**
-```javascript
-// Enqueue processing task
-const result = await fetch('/api/v1/integration/queues/processing/enqueue', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    type: 'data_processing',
-    priority: 'high',
-    data: { file_url: 'https://example.com/data.csv' },
-    callback_url: 'https://myapp.com/callback'
-  })
-});
-
-// Handle processing callback
-app.post('/callback', (req, res) => {
-  const { status, result } = req.body;
-  // Handle processing result
-});
-```
-
-#### **Load Balancing Integration**
-```javascript
-// Register backend service
-await fetch('/api/v1/integration/backends/register', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    id: 'ml-service-1',
-    url: 'http://ml-service:8000',
-    supported_request_types: ['ai_processing', 'data_analysis'],
-    max_concurrent_requests: 10
-  })
-});
-
-// Route requests through load balancer
-const result = await fetch('/api/v1/integration/load-balance/ai_processing', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    model: 'llama2',
-    prompt: 'Analyze this data...'
-  })
-});
-```
-
-### 🎯 **Use Cases & Applications**
-
-#### **1. Automated Data Processing Pipelines**
-- **ETL Workflows**: Extract, transform, and load data automatically
-- **Quality Assurance**: Automated data validation and cleaning
-- **Report Generation**: Scheduled report creation and distribution
-- **Data Synchronization**: Keep multiple systems in sync
-
-#### **2. Intelligent Business Process Automation**
-- **Approval Workflows**: Multi-step approval processes with conditional logic
-- **Notification Systems**: Intelligent alerting based on business rules
-- **Resource Management**: Automated resource allocation and optimization
-- **Compliance Monitoring**: Automated compliance checks and reporting
-
-#### **3. Real-time Event Processing**
-- **IoT Data Processing**: Real-time sensor data analysis and alerting
-- **User Behavior Tracking**: Automated user journey analysis and optimization
-- **System Monitoring**: Intelligent system health monitoring and response
-- **Security Incident Response**: Automated security event processing and alerting
-
-### 🚀 **Getting Started with Orchestration & Automation**
-
-#### **1. Create Your First Workflow**
-```javascript
-// Define a simple data processing workflow
-const workflowDefinition = {
-  name: "Data Processing Pipeline",
-  description: "Automated data cleaning and analysis",
-  steps: {
-    "validate_data": {
-      id: "validate_data",
-      name: "Validate Input Data",
-      type: "data_validation",
-      config: { required_fields: ["name", "email", "data"] }
-    },
-    "clean_data": {
-      id: "clean_data",
-      name: "Clean Data",
-      type: "data_cleaning",
-      config: { remove_duplicates: true, fill_missing: true },
-      dependencies: ["validate_data"]
-    },
-    "analyze_data": {
-      id: "analyze_data",
-      name: "Analyze Data",
-      type: "ai_processing",
-      config: { model: "llama2", analysis_type: "sentiment" },
-      dependencies: ["clean_data"]
-    }
-  },
-  priority: "normal",
-  max_execution_time: 1800
-};
-
-// Create the workflow
-const response = await fetch('/api/v1/workflows/definitions', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(workflowDefinition)
-});
-```
-
-#### **2. Schedule Workflow Execution**
-```javascript
-// Schedule daily execution
-const scheduleResponse = await fetch('/api/v1/workflows/schedule', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    workflow_id: "data-processing-pipeline",
-    trigger_type: "scheduled",
-    cron_expression: "0 9 * * *",  // Daily at 9 AM
-    parameters: { source: "daily_export.csv" }
-  })
-});
-```
-
-#### **3. Monitor Workflow Execution**
-```javascript
-// Get execution status
-const statusResponse = await fetch('/api/v1/workflows/executions/exec_123', {
-  method: 'GET'
-});
-
-const status = await statusResponse.json();
-console.log('Workflow Status:', status.data.status);
-console.log('Current Step:', status.data.current_step);
-console.log('Progress:', status.data.step_results);
-```
-
-#### **4. Set Up Webhook Notifications**
-```javascript
-// Subscribe to workflow events
-const webhookResponse = await fetch('/api/v1/integration/webhooks/subscribe', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    url: "https://myapp.com/webhooks/workflow",
-    events: ["workflow.completed", "workflow.failed"],
-    secret: "webhook-secret-123"
-  })
-});
-```
-
-### 📊 **Monitoring & Analytics**
-
-#### **Workflow Performance Metrics**
-- **Execution Times**: Average, minimum, and maximum execution times
-- **Success Rates**: Workflow completion rates and failure analysis
-- **Step Performance**: Individual step execution times and success rates
-- **Resource Usage**: CPU, memory, and I/O utilization per workflow
-
-#### **Integration Layer Metrics**
-- **API Gateway**: Request rates, response times, error rates
-- **Queue Performance**: Queue depth, processing rates, retry rates
-- **Load Balancer**: Backend health, request distribution, failover events
-- **Webhook Delivery**: Success rates, retry attempts, delivery times
-
-### 🔧 **Advanced Configuration**
-
-#### **Workflow Resource Optimization**
-```json
-{
-  "resource_requirements": {
-    "cpu_percent": 50,
-    "memory_gb": 2.0,
-    "gpu_required": false,
-    "network_bandwidth_mbps": 10
-  },
-  "scaling_policy": {
-    "auto_scale": true,
-    "max_instances": 5,
-    "scale_up_threshold": 80,
-    "scale_down_threshold": 20
-  }
-}
-```
-
-#### **Queue Priority Management**
-```json
-{
-  "queue_config": {
-    "max_concurrent": 10,
-    "priority_weights": {
-      "critical": 4,
-      "high": 3,
-      "normal": 2,
-      "low": 1
-    },
-    "time_based_priority": true
-  }
-}
-```
-
-**Frontend Integration Quick Start:**
-```javascript
-// Create and execute a workflow
-const workflow = await fetch('/api/v1/workflows/definitions', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(workflowDefinition)
-});
-
-// Monitor execution in real-time
-const execution = await fetch('/api/v1/workflows/execute', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ workflow_id: 'my-workflow' })
-});
-
-// Set up webhook notifications
-await fetch('/api/v1/integration/webhooks/subscribe', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    url: 'https://myapp.com/webhook',
-    events: ['workflow.completed']
-  })
-});
-```
-
-**🎯 Start exploring your new capabilities at:** http://localhost:8000/docs
-
-The journey continues with endless possibilities for AI-powered automation and intelligent content processing! 🚀
