@@ -21,9 +21,26 @@ from .personalization import router as personalization_router
 from .trends import router as trends_router
 from .search_analytics import router as search_analytics_router
 
+# Phase 2 Content Connectors
+from .connectors import router as connectors_router
+
+# Phase 3 AI Features
+from .vision import router as vision_router
+from .audio import router as audio_router
+from .semantic import router as semantic_router
+
 # Phase 5 Orchestration & Automation
 from .workflow_automation import router as workflow_automation_router
 from .integration_layer import router as integration_layer_router
+
+# Phase 4 Advanced Features
+from .automated_followups import router as automated_followups_router
+from .performance_cache import router as performance_cache_router
+from .security_service import router as security_service_router
+from .advanced_analytics import router as advanced_analytics_router
+
+# Knowledge Base Workflow System
+from .knowledge_base_presenter import router as knowledge_base_router
 
 # Create main API router
 api_router = APIRouter(prefix="/api/v1")
@@ -49,16 +66,29 @@ api_router.include_router(semantic_processing_router, tags=["Semantic Processing
 
 # Phase 2 Content Connectors
 api_router.include_router(content_router, tags=["Content Connectors"])
+api_router.include_router(connectors_router, prefix="/connectors", tags=["Content Connectors"])
 
 # Phase 4 Analytics & Intelligence
 api_router.include_router(analytics_router, tags=["Analytics & Insights"])
 api_router.include_router(personalization_router, tags=["Personalization"])
 api_router.include_router(trends_router, tags=["Trend Detection & Analytics"])
 api_router.include_router(search_analytics_router, tags=["Search Analytics"])
+api_router.include_router(automated_followups_router, tags=["Automated Follow-ups"])
+api_router.include_router(performance_cache_router, tags=["Performance Cache"])
+api_router.include_router(security_service_router, tags=["Security Service"])
+api_router.include_router(advanced_analytics_router, tags=["Advanced Analytics"])
+
+# Phase 3 AI Features
+api_router.include_router(vision_router, prefix="/vision", tags=["Vision AI"])
+api_router.include_router(audio_router, prefix="/audio", tags=["Audio AI"])
+api_router.include_router(semantic_router, prefix="/semantic", tags=["Semantic Processing"])
 
 # Phase 5 Orchestration & Automation
-api_router.include_router(workflow_automation_router, tags=["Workflow Automation"])
+api_router.include_router(workflow_automation_router, prefix="/workflows", tags=["Workflow Automation"])
 api_router.include_router(integration_layer_router, tags=["Integration Layer"])
+
+# Knowledge Base Workflow System
+api_router.include_router(knowledge_base_router, tags=["Knowledge Base"])
 
 # WebSocket routes don't use /api/v1 prefix
 ws_router = APIRouter()

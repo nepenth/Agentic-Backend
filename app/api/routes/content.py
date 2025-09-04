@@ -27,6 +27,9 @@ from app.connectors.communication import EmailConnector, SlackConnector, Discord
 from app.connectors.filesystem import LocalFileSystemConnector, S3Connector, GoogleCloudStorageConnector
 from app.connectors.api import RESTAPIConnector, GraphQLConnector, WebSocketConnector
 from app.processors.content_pipeline import ContentProcessingPipeline, ProcessingResult
+from app.db.database import get_db
+from app.db.models.content import ContentItem as DBContentItem, ContentCache
+from sqlalchemy import select, desc
 from app.utils.logging import get_logger
 
 logger = get_logger("content_routes")
@@ -55,10 +58,22 @@ def initialize_connectors():
         )))
 
         # Social media connectors
+        from app.config import settings
+
+        # Use actual X API credentials from settings
+        credentials = {}
+        if settings.x_bearer_token:
+            credentials["bearer_token"] = settings.x_bearer_token
+        if settings.x_api_key and settings.x_api_secret:
+            credentials["api_key"] = settings.x_api_key
+            credentials["api_secret"] = settings.x_api_secret
+        # Removed old X API fields - now only using bearer_token, api_key, api_secret
+
         connector_registry.register(TwitterConnector(ConnectorConfig(
             name="twitter",
             connector_type=ConnectorType.SOCIAL_MEDIA,
-            source_config={}
+            source_config={},
+            credentials=credentials
         )))
         connector_registry.register(RedditConnector(ConnectorConfig(
             name="reddit",
@@ -208,6 +223,73 @@ class ConnectorInfo(BaseModel):
     status: str
 
 # API Endpoints
+@router.get("/{content_id}", response_model=ContentDataResponse)
+async def get_content_by_id(content_id: str) -> ContentDataResponse:
+    """
+    Get content by ID with caching support.
+
+    This endpoint retrieves content by ID, first checking the cache for performance.
+    If not cached or cache is expired, it will fetch from the original source.
+    """
+    try:
+        # First check cache
+        async for session in get_db():
+            cache_result = await session.execute(
+                select(ContentCache).where(
+                    ContentCache.cache_key == f"content:{content_id}",
+                    ContentCache.is_valid == True
+                ).order_by(desc(ContentCache.last_accessed_at))
+            )
+            cache_entry = cache_result.scalar_one_or_none()
+
+            if cache_entry and cache_entry.expires_at and cache_entry.expires_at > datetime.now():
+                # Cache hit - return cached content
+                content_result = await session.execute(
+                    select(DBContentItem).where(DBContentItem.id == cache_entry.content_item_id)
+                )
+                content_item = content_result.scalar_one_or_none()
+
+                if content_item:
+                    # Update cache access time
+                    cache_entry.last_accessed_at = datetime.now()
+                    cache_entry.access_count += 1
+                    await session.commit()
+
+                    # Return cached response
+                    response_item = ContentItemResponse(
+                        id=str(content_item.id),
+                        source=content_item.source_id,
+                        connector_type=content_item.connector_type,
+                        content_type=content_item.content_type,
+                        title=content_item.title,
+                        description=content_item.description,
+                        url=content_item.url,
+                        metadata=content_item.content_metadata or {},
+                        last_modified=content_item.last_modified,
+                        tags=content_item.tags or []
+                    )
+
+                    return ContentDataResponse(
+                        item=response_item,
+                        raw_data_size=cache_entry.file_size_bytes or 0,
+                        text_content_preview=f"Cached content from {cache_entry.created_at.isoformat()}",
+                        structured_data_keys=None,
+                        metadata={"cached": True, "cache_created": cache_entry.created_at.isoformat()},
+                        processing_time_ms=0
+                    )
+
+        # Cache miss or expired - fetch from source
+        # For now, return a placeholder response since we don't have the source info
+        # In a real implementation, you'd store source information with the content
+        raise HTTPException(status_code=404, detail=f"Content {content_id} not found in cache and source information not available")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get content {content_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get content: {str(e)}")
+
+
 @router.post("/discover", response_model=List[ContentItemResponse])
 async def discover_content(
     request: ContentDiscoveryRequest,

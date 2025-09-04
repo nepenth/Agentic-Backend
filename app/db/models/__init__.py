@@ -34,7 +34,8 @@ from .knowledge_base import (
     KnowledgeBaseEmbedding,
     KnowledgeBaseAnalysis,
     KnowledgeBaseMedia,
-    KnowledgeBaseSearchLog
+    KnowledgeBaseSearchLog,
+    KnowledgeBaseProcessingPhase
 )
 from .integration_layer import (
     QueueItem,
@@ -88,6 +89,7 @@ __all__ = [
     "KnowledgeBaseAnalysis",
     "KnowledgeBaseMedia",
     "KnowledgeBaseSearchLog",
+    "KnowledgeBaseProcessingPhase",
     "QueueItem",
     "BackendService",
     "BackendServiceMetrics",

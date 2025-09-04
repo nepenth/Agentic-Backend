@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 from typing import List, Dict, Any, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 from app.db.models.chat_session import ChatSession, ChatMessage
@@ -333,6 +333,10 @@ class ChatService:
                 update_data["completed_at"] = completed_at
             if status in ["completed", "archived"]:
                 update_data["is_active"] = False
+            elif status == "resumable":
+                # Keep session active and resumable
+                update_data["is_active"] = True
+                update_data["is_resumable"] = True
 
             await self.db.execute(
                 update(ChatSession)
@@ -348,6 +352,47 @@ class ChatService:
             logger.error(f"Failed to update session {session_id} status: {e}")
             await self.db.rollback()
             return False
+
+    async def cleanup_old_sessions(self, retention_days: int = 365):
+        """Clean up chat sessions and messages older than retention period."""
+        try:
+            from sqlalchemy import and_, or_
+            cutoff_date = datetime.now() - timedelta(days=retention_days)
+
+            # Find sessions that are completed/archived and older than retention period
+            # But keep active/resumable sessions regardless of age
+            result = await self.db.execute(
+                select(ChatSession).where(
+                    and_(
+                        or_(
+                            ChatSession.status.in_(["completed", "archived"]),
+                            ChatSession.is_active == False
+                        ),
+                        ChatSession.created_at < cutoff_date
+                    )
+                )
+            )
+            old_sessions = result.scalars().all()
+
+            deleted_count = 0
+            for session in old_sessions:
+                # Delete messages first
+                await self.db.execute(
+                    delete(ChatMessage).where(ChatMessage.session_id == session.id)
+                )
+                # Delete session
+                await self.db.delete(session)
+                deleted_count += 1
+
+            await self.db.commit()
+
+            logger.info(f"Cleaned up {deleted_count} chat sessions older than {retention_days} days")
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup old chat sessions: {e}")
+            await self.db.rollback()
+            return 0
 
     async def delete_session(self, session_id: UUID) -> bool:
         """Delete a chat session and all its messages."""

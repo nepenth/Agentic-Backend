@@ -121,9 +121,6 @@ celerybeat.pid
 
 # Environments
 .env
-.env.local
-.env.development
-.env.test
 .env.production
 .venv
 env/
@@ -237,3 +234,11 @@ cache/
 # Application logs
 app.log
 logs/
+
+# playwright cache
+playwright_cache/
+
+# ENV
+.env
+env
+**/.env

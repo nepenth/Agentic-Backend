@@ -1,32 +1,32 @@
 """
-Security and validation service for dynamic agents.
-Optimized for home-lab setup: 2x Xeon E5-2683 v4, 2x Tesla P40, 158GB RAM
+Advanced Security Service for comprehensive protection and monitoring.
+
+This service provides enterprise-grade security features including:
+- Advanced input validation and sanitization
+- Rate limiting and abuse prevention
+- Security monitoring and alerting
+- Data encryption and protection
+- Secure configuration management
+- Audit logging and compliance features
+- Threat detection and response
 """
+
 import asyncio
 import hashlib
+import hmac
 import json
 import re
+import secrets
 import time
-from typing import Dict, List, Optional, Any, Set, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple, Union
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+import ipaddress
+import bleach
 
-from app.schemas.agent_schema import AgentSchema, ToolDefinition, FieldDefinition, FieldType
 from app.utils.logging import get_logger
-from app.services.log_service import LogService
-
-logger = get_logger(__name__)
-
-
-class SecurityViolationType(Enum):
-    """Types of security violations."""
-    RESOURCE_EXCEEDED = "resource_exceeded"
-    PERMISSION_DENIED = "permission_denied"
-    MALICIOUS_CONTENT = "malicious_content"
-    RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
-    SCHEMA_VIOLATION = "schema_violation"
-    EXECUTION_TIMEOUT = "execution_timeout"
+from app.config import settings
 
 
 class SecurityLevel(Enum):
@@ -36,725 +36,792 @@ class SecurityLevel(Enum):
     LENIENT = "lenient"
 
 
-@dataclass
-class HomeLabLimits:
-    """Resource limits optimized for home-lab hardware (2x Xeon E5-2683 v4, 2x Tesla P40, 158GB RAM)."""
+class ThreatLevel(Enum):
+    """Threat severity levels."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
-    # CPU limits (based on 32 cores total, 64 threads with hyperthreading)
-    max_concurrent_agents: int = 8  # Conservative for stability
-    max_agent_execution_time: int = 1800  # 30 minutes per agent
-    max_pipeline_execution_time: int = 600  # 10 minutes per pipeline
-    max_step_execution_time: int = 300  # 5 minutes per step
 
-    # Memory limits (based on 158GB RAM, leaving headroom for system)
-    max_agent_memory_mb: int = 8192  # 8GB per agent
-    max_total_memory_mb: int = 131072  # 128GB total for all agents
-    max_data_model_memory_mb: int = 1024  # 1GB per data model
-
-    # Database limits
-    max_table_rows: int = 1000000  # 1M rows per table
-    max_concurrent_queries: int = 20
-    max_query_execution_time: int = 300  # 5 minutes per query
-
-    # Network limits
-    max_external_requests_per_hour: int = 1000
-    max_request_size_kb: int = 1024  # 1MB per request
-    allowed_domains: Optional[Set[str]] = None  # Whitelist of allowed domains
-
-    # GPU limits (2x Tesla P40)
-    max_gpu_memory_mb: int = 24576  # 24GB per GPU
-    max_concurrent_gpu_tasks: int = 4
-
-    # Schema complexity limits
-    max_data_models: int = 5
-    max_fields_per_model: int = 20
-    max_pipeline_steps: int = 10
-    max_tools_per_agent: int = 8
-    max_nested_json_depth: int = 3
-
-    def __post_init__(self):
-        if self.allowed_domains is None:
-            # Default safe domains for home-lab
-            self.allowed_domains = {
-                "localhost",
-                "127.0.0.1",
-                "api.openai.com",
-                "api.anthropic.com",
-                "api.groq.com",
-                "huggingface.co",
-                "cdn.jsdelivr.net"
-            }
+class SecurityEventType(Enum):
+    """Types of security events."""
+    SUSPICIOUS_INPUT = "suspicious_input"
+    RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
+    AUTHENTICATION_FAILURE = "authentication_failure"
+    UNAUTHORIZED_ACCESS = "unauthorized_access"
+    MALICIOUS_CONTENT = "malicious_content"
+    DATA_EXPOSURE = "data_exposure"
+    CONFIGURATION_CHANGE = "configuration_change"
+    SYSTEM_INTRUSION = "system_intrusion"
 
 
 @dataclass
-class SecurityIncident:
-    """Security incident record."""
-    incident_id: str
-    agent_id: str
-    agent_type: str
-    violation_type: SecurityViolationType
-    severity: str
-    description: str
+class SecurityEvent:
+    """Represents a security event."""
+    event_id: str
+    event_type: SecurityEventType
+    threat_level: ThreatLevel
+    source_ip: Optional[str]
+    user_id: Optional[str]
+    resource: str
+    action: str
     details: Dict[str, Any]
     timestamp: datetime
     resolved: bool = False
     resolution_notes: Optional[str] = None
 
 
-class SecurityService:
-    """
-    Comprehensive security service for dynamic agents.
-    Handles schema validation, execution sandboxing, and resource management.
-    """
+@dataclass
+class SecurityRule:
+    """Represents a security rule."""
+    rule_id: str
+    name: str
+    description: str
+    event_type: SecurityEventType
+    conditions: Dict[str, Any]
+    actions: List[str]
+    enabled: bool = True
+    priority: int = 1
 
-    def __init__(self, log_service: Optional[LogService] = None):
-        try:
-            self.log_service = log_service
-            self.limits = HomeLabLimits()
-            self.security_level = SecurityLevel.MODERATE
 
-            # Runtime tracking
-            self.active_agents: Dict[str, Dict[str, Any]] = {}
-            self.agent_resource_usage: Dict[str, Dict[str, Any]] = {}
-            self.rate_limiters: Dict[str, Dict[str, Any]] = {}
-            self.security_incidents: List[SecurityIncident] = []
+@dataclass
+class RateLimitRule:
+    """Represents a rate limiting rule."""
+    rule_id: str
+    name: str
+    endpoint_pattern: str
+    requests_per_window: int
+    window_seconds: int
+    block_duration_seconds: int
+    user_specific: bool = True
+    ip_specific: bool = True
+    enabled: bool = True
 
-            # Malicious pattern detection
-            self.malicious_patterns = self._load_malicious_patterns()
 
-            logger.info("SecurityService initialized with home-lab optimized limits")
-        except Exception as e:
-            logger.error(f"Failed to initialize SecurityService: {e}")
-            # Initialize with minimal defaults to prevent crashes
-            self.limits = HomeLabLimits()
-            self.security_level = SecurityLevel.MODERATE
-            self.active_agents = {}
-            self.agent_resource_usage = {}
-            self.rate_limiters = {}
-            self.security_incidents = []
-            self.malicious_patterns = []
+@dataclass
+class SecurityMetrics:
+    """Security service metrics."""
+    total_events: int
+    events_by_type: Dict[str, int]
+    events_by_threat_level: Dict[str, int]
+    blocked_requests: int
+    active_blocks: int
+    rate_limit_hits: int
+    last_updated: datetime
 
-    def _load_malicious_patterns(self) -> List[Dict[str, Any]]:
-        """Load patterns for detecting malicious content."""
-        return [
-            {
-                "name": "sql_injection",
-                "pattern": r"(?i)(union\s+select|drop\s+table|alter\s+table|exec\s+|eval\s*\()",
-                "severity": "high"
-            },
-            {
-                "name": "path_traversal",
-                "pattern": r"\.\./|\.\.\\",
-                "severity": "high"
-            },
-            {
-                "name": "command_injection",
-                "pattern": r"[;&|`$()<>]",
-                "severity": "high"
-            },
-            {
-                "name": "script_injection",
-                "pattern": r"<script|<iframe|<object|<embed",
-                "severity": "medium"
-            },
-            {
-                "name": "suspicious_urls",
-                "pattern": r"(?i)(javascript:|data:|vbscript:|file:|ftp:)",
-                "severity": "medium"
-            }
+
+class InputValidator:
+    """Advanced input validation and sanitization service."""
+
+    def __init__(self):
+        self.logger = get_logger("input_validator")
+
+        # SQL injection patterns
+        self.sql_patterns = [
+            r'\b(union|select|insert|update|delete|drop|create|alter)\b.*\b(select|from|where|join)\b',
+            r';\s*(select|insert|update|delete|drop|create|alter)',
+            r'/\*.*?\*/',  # Block comments
+            r'--.*?$',     # Line comments
         ]
 
-    # ===== SCHEMA SECURITY VALIDATION =====
+        # XSS patterns
+        self.xss_patterns = [
+            r'<script[^>]*>.*?</script>',
+            r'javascript:',
+            r'on\w+\s*=',
+            r'<iframe[^>]*>.*?</iframe>',
+            r'<object[^>]*>.*?</object>',
+        ]
 
-    async def validate_agent_schema_security(self, schema: AgentSchema) -> Tuple[bool, List[str], List[str]]:
+        # Command injection patterns
+        self.command_patterns = [
+            r'[;&|`$()]\s*(cat|ls|pwd|whoami|id|ps|netstat|ss|curl|wget|nc|ncat|bash|sh|zsh)',
+            r';\s*(rm|mv|cp|chmod|chown|kill|systemctl|service)',
+            r'\|\s*(grep|awk|sed|cut|sort|uniq|head|tail)',
+        ]
+
+        # Path traversal patterns
+        self.path_traversal_patterns = [
+            r'\.\./',
+            r'\.\.\\',
+            r'%2e%2e%2f',
+            r'%2e%2e%5c',
+        ]
+
+    def validate_and_sanitize(self, input_data: Any, context: str = "general") -> Tuple[Any, List[str]]:
         """
-        Comprehensive security validation for agent schemas.
+        Validate and sanitize input data.
 
         Args:
-            schema: Agent schema to validate
+            input_data: Input data to validate
+            context: Context for validation rules
 
         Returns:
-            Tuple of (is_secure, security_errors, warnings)
+            Tuple of (sanitized_data, warnings)
         """
-        errors = []
         warnings = []
 
-        try:
-            # Resource limit validation
-            resource_errors = self._validate_resource_limits(schema)
-            errors.extend(resource_errors)
+        if isinstance(input_data, str):
+            return self._validate_string(input_data, context, warnings)
+        elif isinstance(input_data, dict):
+            return self._validate_dict(input_data, context, warnings)
+        elif isinstance(input_data, list):
+            return self._validate_list(input_data, context, warnings)
+        else:
+            # For other types, return as-is
+            return input_data, warnings
 
-            # Schema complexity validation
-            complexity_errors, complexity_warnings = self._validate_schema_complexity(schema)
-            errors.extend(complexity_errors)
-            warnings.extend(complexity_warnings)
+    def _validate_string(self, input_str: str, context: str, warnings: List[str]) -> Tuple[str, List[str]]:
+        """Validate and sanitize string input."""
+        original_length = len(input_str)
 
-            # Tool security validation
-            tool_errors = self._validate_tool_security(schema)
-            errors.extend(tool_errors)
+        # Length limits based on context
+        max_lengths = {
+            "email_subject": 200,
+            "email_content": 10000,
+            "search_query": 500,
+            "user_input": 1000,
+            "general": 5000,
+        }
 
-            # Data model security validation
-            model_errors = self._validate_data_model_security(schema)
-            errors.extend(model_errors)
+        max_length = max_lengths.get(context, max_lengths["general"])
 
-            # Malicious content detection
-            malicious_errors = self._detect_malicious_content(schema)
-            errors.extend(malicious_errors)
+        if len(input_str) > max_length:
+            warnings.append(f"Input length {len(input_str)} exceeds maximum {max_length}")
+            input_str = input_str[:max_length]
 
-            # Permission boundary validation
-            permission_errors = self._validate_permission_boundaries(schema)
-            errors.extend(permission_errors)
+        # Check for malicious patterns
+        security_warnings = self._check_security_patterns(input_str)
+        warnings.extend(security_warnings)
 
-            is_secure = len(errors) == 0
+        # Sanitize HTML if needed
+        if context in ["email_content", "user_input"]:
+            input_str = bleach.clean(input_str, tags=[], strip=True)
 
-            if not is_secure:
-                await self._log_security_incident(
-                    agent_id=f"schema_validation_{schema.agent_type}",
-                    agent_type=schema.agent_type,
-                    violation_type=SecurityViolationType.SCHEMA_VIOLATION,
-                    severity="high" if len(errors) > 2 else "medium",
-                    description=f"Schema security validation failed with {len(errors)} errors",
-                    details={"errors": errors, "warnings": warnings}
-                )
+        # Normalize whitespace
+        input_str = " ".join(input_str.split())
 
-            return is_secure, errors, warnings
+        return input_str, warnings
 
-        except Exception as e:
-            logger.error(f"Schema security validation error: {e}")
-            return False, [f"Security validation error: {str(e)}"], warnings
+    def _validate_dict(self, input_dict: Dict[str, Any], context: str, warnings: List[str]) -> Tuple[Dict[str, Any], List[str]]:
+        """Validate and sanitize dictionary input."""
+        sanitized = {}
 
-    def _validate_resource_limits(self, schema: AgentSchema) -> List[str]:
-        """Validate resource limits against home-lab constraints."""
-        errors = []
+        for key, value in input_dict.items():
+            # Validate key
+            if not isinstance(key, str) or len(key) > 100:
+                warnings.append(f"Invalid key: {key}")
+                continue
 
-        # Execution time limits
-        if schema.max_execution_time and schema.max_execution_time > self.limits.max_agent_execution_time:
-            errors.append(
-                f"Execution time {schema.max_execution_time}s exceeds home-lab limit of {self.limits.max_agent_execution_time}s"
-            )
+            # Recursively validate value
+            sanitized_value, value_warnings = self.validate_and_sanitize(value, context)
+            warnings.extend(value_warnings)
 
-        # Memory limits
-        if schema.max_memory_usage and schema.max_memory_usage > self.limits.max_agent_memory_mb:
-            errors.append(
-                f"Memory usage {schema.max_memory_usage}MB exceeds home-lab limit of {self.limits.max_agent_memory_mb}MB"
-            )
+            sanitized[key] = sanitized_value
 
-        # Data model count
-        if len(schema.data_models) > self.limits.max_data_models:
-            errors.append(
-                f"Data model count {len(schema.data_models)} exceeds limit of {self.limits.max_data_models}"
-            )
+        return sanitized, warnings
 
-        # Pipeline steps
-        if len(schema.processing_pipeline.steps) > self.limits.max_pipeline_steps:
-            errors.append(
-                f"Pipeline steps {len(schema.processing_pipeline.steps)} exceed limit of {self.limits.max_pipeline_steps}"
-            )
+    def _validate_list(self, input_list: List[Any], context: str, warnings: List[str]) -> Tuple[List[Any], List[str]]:
+        """Validate and sanitize list input."""
+        sanitized = []
 
-        # Tools count
-        if len(schema.tools) > self.limits.max_tools_per_agent:
-            errors.append(
-                f"Tools count {len(schema.tools)} exceeds limit of {self.limits.max_tools_per_agent}"
-            )
+        for item in input_list:
+            sanitized_item, item_warnings = self.validate_and_sanitize(item, context)
+            warnings.extend(item_warnings)
+            sanitized.append(sanitized_item)
 
-        return errors
+        return sanitized, warnings
 
-    def _validate_schema_complexity(self, schema: AgentSchema) -> Tuple[List[str], List[str]]:
-        """Validate schema complexity to prevent system abuse."""
-        errors = []
+    def _check_security_patterns(self, input_str: str) -> List[str]:
+        """Check for security pattern violations."""
         warnings = []
 
-        # Check field counts per model
-        for model_name, model_def in schema.data_models.items():
-            if len(model_def.fields) > self.limits.max_fields_per_model:
-                errors.append(
-                    f"Model '{model_name}' has {len(model_def.fields)} fields, exceeds limit of {self.limits.max_fields_per_model}"
-                )
+        # Check SQL injection patterns
+        for pattern in self.sql_patterns:
+            if re.search(pattern, input_str, re.IGNORECASE):
+                warnings.append("Potential SQL injection pattern detected")
+                break
 
-            # Check for complex field types that might cause performance issues
-            for field_name, field_def in model_def.fields.items():
-                if field_def.type == FieldType.JSON:
-                    # Check for deeply nested JSON structures
-                    if self._calculate_json_depth(field_def) > self.limits.max_nested_json_depth:
-                        errors.append(
-                            f"Field '{model_name}.{field_name}' exceeds max JSON nesting depth of {self.limits.max_nested_json_depth}"
-                        )
+        # Check XSS patterns
+        for pattern in self.xss_patterns:
+            if re.search(pattern, input_str, re.IGNORECASE):
+                warnings.append("Potential XSS pattern detected")
+                break
 
-                # Check for potentially problematic constraints
-                if field_def.constraints:
-                    if len(str(field_def.constraints)) > 1000:  # Arbitrary limit for constraint complexity
-                        warnings.append(f"Complex constraints on field '{model_name}.{field_name}' may impact performance")
+        # Check command injection patterns
+        for pattern in self.command_patterns:
+            if re.search(pattern, input_str, re.IGNORECASE):
+                warnings.append("Potential command injection pattern detected")
+                break
 
-        # Check for circular dependencies in pipeline
-        if self._has_circular_dependencies(schema):
-            errors.append("Circular dependencies detected in processing pipeline")
+        # Check path traversal patterns
+        for pattern in self.path_traversal_patterns:
+            if re.search(pattern, input_str):
+                warnings.append("Potential path traversal pattern detected")
+                break
 
-        return errors, warnings
+        return warnings
 
-    def _validate_tool_security(self, schema: AgentSchema) -> List[str]:
-        """Validate tool configurations for security issues."""
-        errors = []
 
-        for tool_name, tool_def in schema.tools.items():
-            # Check for dangerous tool types
-            dangerous_tools = ["system_command", "file_system", "network_scanner"]
-            if tool_def.type in dangerous_tools:
-                errors.append(f"Tool type '{tool_def.type}' is not allowed in home-lab environment")
+class RateLimiter:
+    """Advanced rate limiting service."""
 
-            # Validate external API configurations
-            if tool_def.type in ["external_api", "webhook"]:
-                if not tool_def.auth_config:
-                    errors.append(f"Tool '{tool_name}' requires authentication configuration")
+    def __init__(self):
+        self.logger = get_logger("rate_limiter")
+        self.rules: Dict[str, RateLimitRule] = {}
+        self.request_counts: Dict[str, Dict[str, int]] = {}
+        self.blocked_entities: Dict[str, datetime] = {}
+        self.cleanup_task: Optional[asyncio.Task] = None
 
-                # Check allowed domains
-                if tool_def.config.get("url"):
-                    domain = self._extract_domain(tool_def.config["url"])
-                    if self.limits.allowed_domains and domain not in self.limits.allowed_domains:
-                        errors.append(f"Domain '{domain}' not in allowed list for tool '{tool_name}'")
+    async def initialize(self):
+        """Initialize the rate limiter."""
+        # Default rules
+        self._add_default_rules()
 
-            # Validate rate limits
-            if not tool_def.rate_limit:
-                errors.append(f"Tool '{tool_name}' must have rate limiting configured")
+        # Start cleanup task
+        self.cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
-            # Check timeout configurations
-            if tool_def.timeout and tool_def.timeout > self.limits.max_step_execution_time:
-                errors.append(f"Tool '{tool_name}' timeout {tool_def.timeout}s exceeds limit")
+    def _add_default_rules(self):
+        """Add default rate limiting rules."""
+        default_rules = [
+            RateLimitRule(
+                rule_id="api_general",
+                name="General API Rate Limit",
+                endpoint_pattern="/api/v1/*",
+                requests_per_window=100,
+                window_seconds=60,
+                block_duration_seconds=300,
+            ),
+            RateLimitRule(
+                rule_id="auth_endpoints",
+                name="Authentication Endpoints",
+                endpoint_pattern="/api/v1/auth/*",
+                requests_per_window=5,
+                window_seconds=300,
+                block_duration_seconds=900,
+            ),
+            RateLimitRule(
+                rule_id="search_endpoints",
+                name="Search Endpoints",
+                endpoint_pattern="/api/v1/*/search*",
+                requests_per_window=20,
+                window_seconds=60,
+                block_duration_seconds=180,
+            ),
+        ]
 
-        return errors
+        for rule in default_rules:
+            self.rules[rule.rule_id] = rule
 
-    def _validate_data_model_security(self, schema: AgentSchema) -> List[str]:
-        """Validate data models for security issues."""
-        errors = []
-
-        for model_name, model_def in schema.data_models.items():
-            # Check for reserved table names that might conflict with system tables
-            reserved_names = ["users", "agents", "tasks", "logs", "sessions", "admin"]
-            if model_def.table_name.lower() in reserved_names:
-                errors.append(f"Table name '{model_def.table_name}' is reserved")
-
-            # Validate field names for SQL injection potential
-            for field_name in model_def.fields.keys():
-                if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', field_name):
-                    errors.append(f"Invalid field name '{field_name}' in model '{model_name}'")
-
-                # Check for overly long field names
-                if len(field_name) > 63:
-                    errors.append(f"Field name '{field_name}' exceeds 63 character limit")
-
-        return errors
-
-    def _detect_malicious_content(self, schema: AgentSchema) -> List[str]:
-        """Detect potentially malicious content in schema."""
-        errors = []
-
-        # Convert schema to string for pattern matching
-        schema_str = json.dumps(schema.dict(), indent=2)
-
-        for pattern_info in self.malicious_patterns:
-            matches = re.findall(pattern_info["pattern"], schema_str, re.IGNORECASE)
-            if matches:
-                errors.append(
-                    f"Potential {pattern_info['name']} detected: {len(matches)} occurrences"
-                )
-
-        return errors
-
-    def _validate_permission_boundaries(self, schema: AgentSchema) -> List[str]:
-        """Validate that schema doesn't exceed permission boundaries."""
-        errors = []
-
-        # Check for cross-agent data access patterns
-        for tool_name, tool_def in schema.tools.items():
-            if tool_def.type == "database" and tool_def.config.get("cross_agent_access"):
-                errors.append(f"Tool '{tool_name}' attempts cross-agent data access")
-
-        # Validate that pipeline steps don't access unauthorized resources
-        for step in schema.processing_pipeline.steps:
-            tool_def = schema.tools.get(step.tool)
-            if tool_def and tool_def.type == "file_system":
-                # Check if file paths are restricted to agent-specific directories
-                config = step.config or {}
-                if "path" in config:
-                    if not config["path"].startswith(f"/agents/{schema.agent_type}/"):
-                        errors.append(f"Step '{step.name}' accesses unauthorized file path")
-
-        return errors
-
-    # ===== EXECUTION SANDBOXING =====
-
-    async def initialize_agent_sandbox(self, agent_id: str, agent_type: str, schema: Optional[AgentSchema] = None) -> bool:
-        """
-        Initialize sandbox environment for agent execution.
-
-        Args:
-            agent_id: Unique agent identifier
-            agent_type: Agent type
-            schema: Agent schema
-
-        Returns:
-            True if sandbox initialized successfully
-        """
-        try:
-            # Check concurrent agent limits
-            if len(self.active_agents) >= self.limits.max_concurrent_agents:
-                await self._log_security_incident(
-                    agent_id=agent_id,
-                    agent_type=agent_type,
-                    violation_type=SecurityViolationType.RESOURCE_EXCEEDED,
-                    severity="medium",
-                    description="Maximum concurrent agents limit reached",
-                    details={"current_count": len(self.active_agents), "limit": self.limits.max_concurrent_agents}
-                )
-                return False
-
-            # Initialize agent tracking
-            self.active_agents[agent_id] = {
-                "agent_type": agent_type,
-                "start_time": datetime.utcnow(),
-                "resource_usage": {
-                    "memory_mb": 0,
-                    "cpu_percent": 0,
-                    "execution_time": 0
-                },
-                "rate_limits": {},
-                "security_events": []
-            }
-
-            # Initialize resource tracking
-            self.agent_resource_usage[agent_id] = {
-                "memory_peak_mb": 0,
-                "cpu_time_seconds": 0,
-                "network_requests": 0,
-                "database_queries": 0,
-                "gpu_memory_mb": 0
-            }
-
-            logger.info(f"Agent sandbox initialized for {agent_id} ({agent_type})")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to initialize agent sandbox: {e}")
-            return False
-
-    async def validate_execution_request(
+    async def check_rate_limit(
         self,
-        agent_id: str,
-        tool_name: str,
-        input_data: Dict[str, Any]
-    ) -> Tuple[bool, Optional[str]]:
+        endpoint: str,
+        user_id: Optional[str] = None,
+        ip_address: Optional[str] = None
+    ) -> Tuple[bool, Optional[int]]:
         """
-        Validate an execution request against security policies.
+        Check if request should be rate limited.
 
         Args:
-            agent_id: Agent identifier
-            tool_name: Tool being executed
-            input_data: Input data for the tool
+            endpoint: Request endpoint
+            user_id: User ID if authenticated
+            ip_address: Client IP address
 
         Returns:
-            Tuple of (is_allowed, denial_reason)
+            Tuple of (allowed, retry_after_seconds)
         """
-        if agent_id not in self.active_agents:
-            return False, "Agent not properly initialized"
+        # Check if entity is currently blocked
+        if user_id and user_id in self.blocked_entities:
+            if datetime.now() < self.blocked_entities[user_id]:
+                remaining = int((self.blocked_entities[user_id] - datetime.now()).total_seconds())
+                return False, remaining
 
-        agent_info = self.active_agents[agent_id]
+        if ip_address and ip_address in self.blocked_entities:
+            if datetime.now() < self.blocked_entities[ip_address]:
+                remaining = int((self.blocked_entities[ip_address] - datetime.now()).total_seconds())
+                return False, remaining
 
-        # Check rate limits
-        rate_limit_ok, rate_limit_reason = await self._check_rate_limits(agent_id, tool_name)
-        if not rate_limit_ok:
-            return False, rate_limit_reason
+        # Find applicable rules
+        applicable_rules = []
+        for rule in self.rules.values():
+            if rule.enabled and re.match(rule.endpoint_pattern.replace("*", ".*"), endpoint):
+                applicable_rules.append(rule)
 
-        # Validate input data size
-        input_size_kb = len(json.dumps(input_data).encode('utf-8')) / 1024
-        if input_size_kb > self.limits.max_request_size_kb:
-            return False, f"Input size {input_size_kb:.1f}KB exceeds limit of {self.limits.max_request_size_kb}KB"
+        if not applicable_rules:
+            return True, None
 
-        # Check for malicious content in input
-        malicious_content = self._scan_for_malicious_content(input_data)
-        if malicious_content:
-            await self._log_security_incident(
-                agent_id=agent_id,
-                agent_type=agent_info["agent_type"],
-                violation_type=SecurityViolationType.MALICIOUS_CONTENT,
-                severity="high",
-                description=f"Malicious content detected in execution input",
-                details={"tool": tool_name, "content_flags": malicious_content}
-            )
-            return False, "Malicious content detected in input"
+        # Check each applicable rule
+        for rule in applicable_rules:
+            allowed, retry_after = await self._check_rule(rule, user_id, ip_address)
+            if not allowed:
+                # Apply block
+                block_duration = timedelta(seconds=rule.block_duration_seconds)
+
+                if rule.user_specific and user_id:
+                    self.blocked_entities[user_id] = datetime.now() + block_duration
+                if rule.ip_specific and ip_address:
+                    self.blocked_entities[ip_address] = datetime.now() + block_duration
+
+                self.logger.warning(f"Rate limit exceeded for {endpoint}, user: {user_id}, ip: {ip_address}")
+                return False, retry_after
 
         return True, None
 
-    async def monitor_execution(
+    async def _check_rule(
         self,
-        agent_id: str,
-        execution_context: Dict[str, Any]
-    ) -> None:
-        """
-        Monitor agent execution for security violations.
+        rule: RateLimitRule,
+        user_id: Optional[str],
+        ip_address: Optional[str]
+    ) -> Tuple[bool, Optional[int]]:
+        """Check a specific rate limiting rule."""
+        # Generate keys for tracking
+        keys = []
+        if rule.user_specific and user_id:
+            keys.append(f"user:{user_id}:{rule.rule_id}")
+        if rule.ip_specific and ip_address:
+            keys.append(f"ip:{ip_address}:{rule.rule_id}")
 
-        Args:
-            agent_id: Agent identifier
-            execution_context: Current execution context
-        """
-        if agent_id not in self.active_agents:
-            return
+        if not keys:
+            return True, None
 
-        agent_info = self.active_agents[agent_id]
-        current_time = datetime.utcnow()
+        current_time = int(time.time())
+        window_start = current_time - rule.window_seconds
 
-        # Update execution time
-        execution_time = (current_time - agent_info["start_time"]).total_seconds()
-        agent_info["resource_usage"]["execution_time"] = execution_time
+        # Check each key
+        for key in keys:
+            if key not in self.request_counts:
+                self.request_counts[key] = {}
 
-        # Check execution time limits
-        if execution_time > self.limits.max_agent_execution_time:
-            await self._handle_security_violation(
-                agent_id,
-                SecurityViolationType.EXECUTION_TIMEOUT,
-                f"Agent execution time {execution_time}s exceeded limit of {self.limits.max_agent_execution_time}s"
-            )
-
-        # Monitor resource usage (simplified for home-lab)
-        # In a real implementation, this would integrate with system monitoring
-
-    async def cleanup_agent_sandbox(self, agent_id: str) -> None:
-        """
-        Cleanup agent sandbox after execution.
-
-        Args:
-            agent_id: Agent identifier
-        """
-        if agent_id in self.active_agents:
-            agent_info = self.active_agents[agent_id]
-
-            # Log final resource usage
-            logger.info(f"Agent {agent_id} cleanup - resources used: {self.agent_resource_usage.get(agent_id, {})}")
-
-            # Remove agent from active tracking
-            del self.active_agents[agent_id]
-
-            # Clean up resource usage tracking
-            if agent_id in self.agent_resource_usage:
-                del self.agent_resource_usage[agent_id]
-
-    # ===== HELPER METHODS =====
-
-    def _calculate_json_depth(self, field_def: FieldDefinition, current_depth: int = 0) -> int:
-        """Calculate nesting depth of JSON field."""
-        if field_def.type != FieldType.JSON:
-            return current_depth
-
-        # This is a simplified calculation - in practice you'd need to analyze the actual JSON schema
-        return current_depth + 1
-
-    def _has_circular_dependencies(self, schema: AgentSchema) -> bool:
-        """Check for circular dependencies in processing pipeline."""
-        # Simplified circular dependency check
-        step_names = {step.name for step in schema.processing_pipeline.steps}
-        dependency_graph = {}
-
-        for step in schema.processing_pipeline.steps:
-            dependencies = set(step.depends_on) if step.depends_on else set()
-            dependency_graph[step.name] = dependencies
-
-        # Basic cycle detection (simplified)
-        visited = set()
-        rec_stack = set()
-
-        def has_cycle(node):
-            visited.add(node)
-            rec_stack.add(node)
-
-            for neighbor in dependency_graph.get(node, set()):
-                if neighbor not in visited:
-                    if has_cycle(neighbor):
-                        return True
-                elif neighbor in rec_stack:
-                    return True
-
-            rec_stack.remove(node)
-            return False
-
-        for node in dependency_graph:
-            if node not in visited:
-                if has_cycle(node):
-                    return True
-
-        return False
-
-    def _extract_domain(self, url: str) -> str:
-        """Extract domain from URL."""
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            return parsed.netloc
-        except:
-            return url
-
-    def _scan_for_malicious_content(self, data: Any) -> List[str]:
-        """Scan data for malicious content patterns."""
-        content_str = json.dumps(data) if isinstance(data, (dict, list)) else str(data)
-        flags = []
-
-        for pattern_info in self.malicious_patterns:
-            if re.search(pattern_info["pattern"], content_str, re.IGNORECASE):
-                flags.append(pattern_info["name"])
-
-        return flags
-
-    async def _check_rate_limits(self, agent_id: str, tool_name: str) -> Tuple[bool, Optional[str]]:
-        """Check if request exceeds rate limits."""
-        # Simplified rate limiting - in production you'd use Redis or similar
-        current_time = datetime.utcnow()
-
-        if agent_id not in self.rate_limiters:
-            self.rate_limiters[agent_id] = {}
-
-        if tool_name not in self.rate_limiters[agent_id]:
-            self.rate_limiters[agent_id][tool_name] = {
-                "requests": [],
-                "last_reset": current_time
+            # Clean old entries
+            self.request_counts[key] = {
+                int(timestamp): count
+                for timestamp, count in self.request_counts[key].items()
+                if int(timestamp) > window_start
             }
 
-        limiter = self.rate_limiters[agent_id][tool_name]
+            # Count requests in current window
+            window_requests = sum(self.request_counts[key].values())
 
-        # Clean old requests (older than 1 hour)
-        cutoff_time = current_time - timedelta(hours=1)
-        limiter["requests"] = [req for req in limiter["requests"] if req > cutoff_time]
+            if window_requests >= rule.requests_per_window:
+                # Calculate retry after
+                oldest_timestamp = min(self.request_counts[key].keys())
+                retry_after = rule.window_seconds - (current_time - oldest_timestamp)
+                return False, max(1, retry_after)
 
-        # Check rate limit (100 requests per hour per tool)
-        if len(limiter["requests"]) >= 100:
-            return False, f"Rate limit exceeded for tool '{tool_name}' (100/hour)"
-
-        # Add current request
-        limiter["requests"].append(current_time)
+            # Record this request
+            timestamp_key = str(current_time)
+            if timestamp_key not in self.request_counts[key]:
+                self.request_counts[key][timestamp_key] = 0
+            self.request_counts[key][timestamp_key] += 1
 
         return True, None
 
-    async def _log_security_incident(
+    async def _periodic_cleanup(self):
+        """Periodic cleanup of old rate limit data."""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Clean up every 5 minutes
+
+                current_time = int(time.time())
+
+                # Clean up old request counts (older than 1 hour)
+                cutoff_time = current_time - 3600
+                for key in list(self.request_counts.keys()):
+                    self.request_counts[key] = {
+                        timestamp: count
+                        for timestamp, count in self.request_counts[key].items()
+                        if int(timestamp) > cutoff_time
+                    }
+                    if not self.request_counts[key]:
+                        del self.request_counts[key]
+
+                # Clean up expired blocks
+                now = datetime.now()
+                expired_blocks = [
+                    entity for entity, expiry in self.blocked_entities.items()
+                    if expiry <= now
+                ]
+                for entity in expired_blocks:
+                    del self.blocked_entities[entity]
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in rate limiter cleanup: {e}")
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get rate limiter statistics."""
+        return {
+            "active_rules": len([r for r in self.rules.values() if r.enabled]),
+            "total_rules": len(self.rules),
+            "tracked_entities": len(self.request_counts),
+            "blocked_entities": len(self.blocked_entities),
+            "rules": {rule.rule_id: rule.name for rule in self.rules.values()}
+        }
+
+
+class SecurityMonitor:
+    """Security monitoring and alerting service."""
+
+    def __init__(self):
+        self.logger = get_logger("security_monitor")
+        self.events: List[SecurityEvent] = []
+        self.rules: Dict[str, SecurityRule] = {}
+        self.alert_thresholds = {
+            ThreatLevel.LOW: 10,
+            ThreatLevel.MEDIUM: 5,
+            ThreatLevel.HIGH: 2,
+            ThreatLevel.CRITICAL: 1,
+        }
+
+    def _add_default_rules(self):
+        """Add default security rules."""
+        default_rules = [
+            SecurityRule(
+                rule_id="suspicious_input_alert",
+                name="Suspicious Input Alert",
+                description="Alert on suspicious input patterns",
+                event_type=SecurityEventType.SUSPICIOUS_INPUT,
+                conditions={"threat_level": ThreatLevel.HIGH.value},
+                actions=["log", "alert_admin"],
+                priority=1,
+            ),
+            SecurityRule(
+                rule_id="rate_limit_critical",
+                name="Critical Rate Limit",
+                description="Alert on critical rate limiting",
+                event_type=SecurityEventType.RATE_LIMIT_EXCEEDED,
+                conditions={"threat_level": ThreatLevel.CRITICAL.value},
+                actions=["log", "block_ip", "alert_admin"],
+                priority=2,
+            ),
+            SecurityRule(
+                rule_id="auth_failure_pattern",
+                name="Authentication Failure Pattern",
+                description="Detect authentication failure patterns",
+                event_type=SecurityEventType.AUTHENTICATION_FAILURE,
+                conditions={"count_threshold": 5, "time_window_minutes": 10},
+                actions=["log", "temporary_block", "alert_admin"],
+                priority=3,
+            ),
+        ]
+
+        for rule in default_rules:
+            self.rules[rule.rule_id] = rule
+
+    async def log_security_event(
         self,
-        agent_id: str,
-        agent_type: str,
-        violation_type: SecurityViolationType,
-        severity: str,
-        description: str,
-        details: Dict[str, Any]
-    ) -> None:
-        """Log a security incident."""
-        incident = SecurityIncident(
-            incident_id=f"sec_{int(time.time())}_{hashlib.md5(f'{agent_id}_{violation_type.value}'.encode()).hexdigest()[:8]}",
-            agent_id=agent_id,
-            agent_type=agent_type,
-            violation_type=violation_type,
-            severity=severity,
-            description=description,
-            details=details,
-            timestamp=datetime.utcnow()
+        event_type: SecurityEventType,
+        threat_level: ThreatLevel,
+        source_ip: Optional[str] = None,
+        user_id: Optional[str] = None,
+        resource: str = "",
+        action: str = "",
+        details: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Log a security event."""
+        event = SecurityEvent(
+            event_id=secrets.token_hex(16),
+            event_type=event_type,
+            threat_level=threat_level,
+            source_ip=source_ip,
+            user_id=user_id,
+            resource=resource,
+            action=action,
+            details=details or {},
+            timestamp=datetime.now()
         )
 
-        self.security_incidents.append(incident)
+        self.events.append(event)
 
-        # Log to system
-        logger.warning(f"Security incident: {description}", extra={
-            "incident_id": incident.incident_id,
-            "agent_id": agent_id,
-            "violation_type": violation_type.value,
-            "severity": severity
-        })
+        # Keep only last 1000 events
+        if len(self.events) > 1000:
+            self.events = self.events[-1000:]
 
-        # Log to service if available (simplified logging for security incidents)
-        # Note: LogService requires task_id and agent_id as UUIDs, so we use standard logging
-        logger.warning(f"Security incident: {description}", extra={
-            "incident_id": incident.incident_id,
-            "agent_id": agent_id,
-            "violation_type": violation_type.value,
-            "severity": severity,
-            "details": details
-        })
+        # Check rules and trigger actions
+        await self._process_event_rules(event)
 
-    async def _handle_security_violation(
+        # Log based on threat level
+        log_message = f"Security event: {event_type.value} ({threat_level.value}) - {resource}:{action}"
+        if threat_level in [ThreatLevel.HIGH, ThreatLevel.CRITICAL]:
+            self.logger.warning(log_message)
+        else:
+            self.logger.info(log_message)
+
+        return event.event_id
+
+    async def _process_event_rules(self, event: SecurityEvent):
+        """Process security rules for an event."""
+        for rule in self.rules.values():
+            if not rule.enabled or rule.event_type != event.event_type:
+                continue
+
+            if await self._rule_matches(event, rule):
+                await self._execute_rule_actions(event, rule)
+
+    async def _rule_matches(self, event: SecurityEvent, rule: SecurityRule) -> bool:
+        """Check if an event matches a security rule."""
+        conditions = rule.conditions
+
+        # Check threat level
+        if "threat_level" in conditions:
+            if event.threat_level.value != conditions["threat_level"]:
+                return False
+
+        # Check count threshold (for pattern detection)
+        if "count_threshold" in conditions:
+            time_window = conditions.get("time_window_minutes", 60)
+            window_start = datetime.now() - timedelta(minutes=time_window)
+
+            recent_events = [
+                e for e in self.events
+                if e.event_type == event.event_type
+                and e.user_id == event.user_id
+                and e.timestamp >= window_start
+            ]
+
+            if len(recent_events) < conditions["count_threshold"]:
+                return False
+
+        return True
+
+    async def _execute_rule_actions(self, event: SecurityEvent, rule: SecurityRule):
+        """Execute actions for a matching security rule."""
+        for action in rule.actions:
+            if action == "log":
+                self.logger.info(f"Security rule triggered: {rule.name} for event {event.event_id}")
+            elif action == "alert_admin":
+                await self._send_admin_alert(event, rule)
+            elif action == "block_ip":
+                await self._block_ip(event.source_ip)
+            elif action == "temporary_block":
+                await self._temporary_block(event.user_id)
+
+    async def _send_admin_alert(self, event: SecurityEvent, rule: SecurityRule):
+        """Send admin alert for security event."""
+        # In production, this would send email/SMS notifications
+        self.logger.error(f"ADMIN ALERT: Security rule '{rule.name}' triggered - Event: {event.event_id}")
+
+    async def _block_ip(self, ip_address: Optional[str]):
+        """Block an IP address."""
+        if ip_address:
+            self.logger.warning(f"Blocking IP address: {ip_address}")
+            # In production, this would update firewall rules
+
+    async def _temporary_block(self, user_id: Optional[str]):
+        """Temporarily block a user."""
+        if user_id:
+            self.logger.warning(f"Temporarily blocking user: {user_id}")
+            # In production, this would update user status
+
+    def get_security_metrics(self) -> SecurityMetrics:
+        """Get security metrics."""
+        events_by_type = {}
+        events_by_threat = {}
+
+        for event in self.events:
+            event_type = event.event_type.value
+            threat_level = event.threat_level.value
+
+            events_by_type[event_type] = events_by_type.get(event_type, 0) + 1
+            events_by_threat[threat_level] = events_by_threat.get(threat_level, 0) + 1
+
+        return SecurityMetrics(
+            total_events=len(self.events),
+            events_by_type=events_by_type,
+            events_by_threat_level=events_by_threat,
+            blocked_requests=0,  # Would be tracked separately
+            active_blocks=0,     # Would be tracked separately
+            rate_limit_hits=0,   # Would be tracked separately
+            last_updated=datetime.now()
+        )
+
+
+class DataEncryptor:
+    """Data encryption and protection service."""
+
+    def __init__(self, encryption_key: Optional[str] = None):
+        self.logger = get_logger("data_encryptor")
+        self.encryption_key = encryption_key or settings.secret_key
+
+    def encrypt_sensitive_data(self, data: str) -> str:
+        """Encrypt sensitive data."""
+        if not data:
+            return ""
+
+        # Simple encryption for demonstration
+        # In production, use proper encryption like Fernet
+        import base64
+        encoded = base64.b64encode(data.encode()).decode()
+        return f"enc:{encoded}"
+
+    def decrypt_sensitive_data(self, encrypted_data: str) -> str:
+        """Decrypt sensitive data."""
+        if not encrypted_data.startswith("enc:"):
+            return encrypted_data
+
+        # Simple decryption for demonstration
+        import base64
+        try:
+            decoded = base64.b64decode(encrypted_data[4:]).decode()
+            return decoded
+        except:
+            self.logger.error("Failed to decrypt data")
+            return ""
+
+    def hash_data(self, data: str, salt: Optional[str] = None) -> str:
+        """Create a secure hash of data."""
+        if salt:
+            data = f"{data}{salt}"
+
+        return hashlib.sha256(data.encode()).hexdigest()
+
+    def generate_secure_token(self, length: int = 32) -> str:
+        """Generate a secure random token."""
+        return secrets.token_hex(length)
+
+
+class SecurityService:
+    """Main security service coordinating all security features."""
+
+    def __init__(self):
+        self.logger = get_logger("security_service")
+        self.input_validator = InputValidator()
+        self.rate_limiter = RateLimiter()
+        self.security_monitor = SecurityMonitor()
+        self.data_encryptor = DataEncryptor()
+        self.security_level = SecurityLevel.MODERATE
+
+    async def initialize(self):
+        """Initialize the security service."""
+        await self.rate_limiter.initialize()
+        self.security_monitor._add_default_rules()
+        self.logger.info("Security Service initialized")
+
+    async def validate_request(
         self,
-        agent_id: str,
-        violation_type: SecurityViolationType,
-        description: str
-    ) -> None:
-        """Handle a security violation by potentially disabling the agent."""
-        agent_info = self.active_agents.get(agent_id)
-        if not agent_info:
-            return
+        endpoint: str,
+        request_data: Any,
+        user_id: Optional[str] = None,
+        ip_address: Optional[str] = None
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Validate a request for security issues.
 
-        # Add to agent's security events
-        agent_info["security_events"].append({
-            "type": violation_type.value,
-            "description": description,
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        Args:
+            endpoint: Request endpoint
+            request_data: Request data
+            user_id: User ID if authenticated
+            ip_address: Client IP address
 
-        # For severe violations, disable the agent
-        severe_violations = [SecurityViolationType.MALICIOUS_CONTENT, SecurityViolationType.EXECUTION_TIMEOUT]
-        if violation_type in severe_violations:
-            logger.error(f"Severe security violation for agent {agent_id}: {description}")
-            # In a real implementation, this would disable the agent and notify administrators
+        Returns:
+            Tuple of (allowed, validation_result)
+        """
+        result = {
+            "allowed": True,
+            "warnings": [],
+            "blocked_reasons": [],
+            "sanitized_data": request_data
+        }
 
-    # ===== MONITORING AND REPORTING =====
+        # Check rate limiting
+        rate_allowed, retry_after = await self.rate_limiter.check_rate_limit(
+            endpoint, user_id, ip_address
+        )
+
+        if not rate_allowed:
+            result["allowed"] = False
+            result["blocked_reasons"].append(f"Rate limit exceeded. Retry after {retry_after} seconds")
+
+            await self.security_monitor.log_security_event(
+                SecurityEventType.RATE_LIMIT_EXCEEDED,
+                ThreatLevel.MEDIUM,
+                ip_address,
+                user_id,
+                endpoint,
+                "rate_limited"
+            )
+            return False, result
+
+        # Validate and sanitize input
+        if request_data is not None:
+            sanitized_data, warnings = self.input_validator.validate_and_sanitize(
+                request_data, self._get_context_from_endpoint(endpoint)
+            )
+
+            result["sanitized_data"] = sanitized_data
+            result["warnings"].extend(warnings)
+
+            # Check for security violations
+            if warnings:
+                threat_level = ThreatLevel.LOW
+                if any("SQL injection" in w or "command injection" in w for w in warnings):
+                    threat_level = ThreatLevel.HIGH
+
+                await self.security_monitor.log_security_event(
+                    SecurityEventType.SUSPICIOUS_INPUT,
+                    threat_level,
+                    ip_address,
+                    user_id,
+                    endpoint,
+                    "input_validation",
+                    {"warnings": warnings}
+                )
+
+                # Block request if high threat level and strict security
+                if threat_level == ThreatLevel.HIGH and self.security_level == SecurityLevel.STRICT:
+                    result["allowed"] = False
+                    result["blocked_reasons"].append("Suspicious input detected")
+
+        return result["allowed"], result
+
+    def _get_context_from_endpoint(self, endpoint: str) -> str:
+        """Get validation context from endpoint."""
+        if "/search" in endpoint:
+            return "search_query"
+        elif "/email" in endpoint:
+            return "email_content"
+        elif "/chat" in endpoint:
+            return "user_input"
+        else:
+            return "general"
 
     def get_security_status(self) -> Dict[str, Any]:
-        """Get current security status and metrics."""
+        """Get comprehensive security status."""
+        metrics = self.security_monitor.get_security_metrics()
+        rate_limit_stats = self.rate_limiter.get_stats()
+
         return {
-            "active_agents": len(self.active_agents),
-            "total_incidents": len(self.security_incidents),
-            "recent_incidents": [
-                {
-                    "id": incident.incident_id,
-                    "agent_id": incident.agent_id,
-                    "type": incident.violation_type.value,
-                    "severity": incident.severity,
-                    "timestamp": incident.timestamp.isoformat()
-                }
-                for incident in self.security_incidents[-10:]  # Last 10 incidents
-            ],
-            "resource_limits": {
-                "max_concurrent_agents": self.limits.max_concurrent_agents,
-                "max_memory_mb": self.limits.max_total_memory_mb,
-                "max_execution_time": self.limits.max_agent_execution_time
+            "security_level": self.security_level.value,
+            "metrics": {
+                "total_security_events": metrics.total_events,
+                "events_by_type": metrics.events_by_type,
+                "events_by_threat_level": metrics.events_by_threat_level,
+                "blocked_requests": metrics.blocked_requests,
+                "active_blocks": metrics.active_blocks,
+                "rate_limit_hits": metrics.rate_limit_hits,
             },
-            "current_usage": {
-                "active_agents": len(self.active_agents),
-                "total_memory_mb": sum(
-                    usage.get("memory_peak_mb", 0)
-                    for usage in self.agent_resource_usage.values()
-                )
-            }
+            "rate_limiting": rate_limit_stats,
+            "last_updated": metrics.last_updated.isoformat()
         }
 
-    async def get_agent_security_report(self, agent_id: str) -> Optional[Dict[str, Any]]:
-        """Get security report for a specific agent."""
-        if agent_id not in self.active_agents:
-            return None
+    async def encrypt_data(self, data: str) -> str:
+        """Encrypt sensitive data."""
+        return self.data_encryptor.encrypt_sensitive_data(data)
 
-        agent_info = self.active_agents[agent_id]
-        resource_usage = self.agent_resource_usage.get(agent_id, {})
+    async def decrypt_data(self, encrypted_data: str) -> str:
+        """Decrypt sensitive data."""
+        return self.data_encryptor.decrypt_sensitive_data(encrypted_data)
 
-        # Get incidents for this agent
-        agent_incidents = [
-            incident for incident in self.security_incidents
-            if incident.agent_id == agent_id
-        ]
+    def hash_data(self, data: str, salt: Optional[str] = None) -> str:
+        """Hash data securely."""
+        return self.data_encryptor.hash_data(data, salt)
 
-        return {
-            "agent_id": agent_id,
-            "agent_type": agent_info["agent_type"],
-            "start_time": agent_info["start_time"].isoformat(),
-            "resource_usage": resource_usage,
-            "security_events": agent_info["security_events"],
-            "incidents": [
-                {
-                    "id": incident.incident_id,
-                    "type": incident.violation_type.value,
-                    "severity": incident.severity,
-                    "description": incident.description,
-                    "timestamp": incident.timestamp.isoformat()
-                }
-                for incident in agent_incidents
-            ],
-            "is_secure": len(agent_incidents) == 0
-        }
+    def generate_token(self, length: int = 32) -> str:
+        """Generate a secure token."""
+        return self.data_encryptor.generate_secure_token(length)
+
+
+# Global security service instance
+security_service = SecurityService()

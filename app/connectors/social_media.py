@@ -24,6 +24,7 @@ from app.connectors.base import (
     ContentType,
     ValidationStatus
 )
+from app.db.models.knowledge_base import TwitterBookmarkTracker
 from app.utils.logging import get_logger
 
 logger = get_logger("social_media_connector")
@@ -34,7 +35,9 @@ class TwitterConnector(ContentConnector):
 
     def __init__(self, config: ConnectorConfig):
         super().__init__(config)
-        self.api_base_url = "https://api.twitter.com/2"
+        # Import settings to get X API configuration
+        from app.config import settings
+        self.api_base_url = settings.x_base_url or "https://api.x.com/2"
         self.tweet_cache: Dict[str, Dict[str, Any]] = {}
         self.cache_ttl = 300  # 5 minutes
 
@@ -112,7 +115,20 @@ class TwitterConnector(ContentConnector):
         return self._parse_tweets(data, "timeline")
 
     async def _get_bookmarks(self, params: Dict[str, Any]) -> List[ContentItem]:
-        """Get user bookmarks."""
+        """Get user bookmarks using Playwright web scraping with incremental support."""
+        max_results = params.get("max_results", 50)
+        use_playwright = params.get("use_playwright", True)  # Default to Playwright
+        db_session = params.get("db_session")  # Database session for persistence
+        incremental = params.get("incremental", False)  # Enable incremental updates
+
+        if use_playwright:
+            return await self._get_bookmarks_playwright(max_results, db_session, incremental)
+        else:
+            # Fallback to API method (if user upgrades to paid plan)
+            return await self._get_bookmarks_api(params)
+
+    async def _get_bookmarks_api(self, params: Dict[str, Any]) -> List[ContentItem]:
+        """Get user bookmarks using Twitter API (requires paid plan)."""
         user_id = params.get("user_id")
         max_results = params.get("max_results", 10)
 
@@ -136,6 +152,187 @@ class TwitterConnector(ContentConnector):
         data = response.json_data
         return self._parse_tweets(data, "bookmarks")
 
+    async def _get_bookmarks_playwright(self, max_results: int, db_session=None, incremental: bool = False) -> List[ContentItem]:
+        """Get user bookmarks using Playwright web scraping with thread detection and persistence."""
+        from datetime import datetime
+        import re
+
+        # Get credentials from config
+        from app.config import settings
+        username = settings.x_username or ''
+        password = settings.x_password or ''
+
+        if not username or not password:
+            raise Exception(
+                "Playwright bookmark fetching requires X_USERNAME and X_PASSWORD in environment variables.\n"
+                "Add these to your .env file:\n"
+                "- X_USERNAME=your_twitter_username\n"
+                "- X_PASSWORD=your_twitter_password"
+            )
+
+        try:
+            from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+        except ImportError:
+            raise Exception(
+                "Playwright is required for bookmark fetching. Install with:\n"
+                "pip install playwright\n"
+                "playwright install chromium"
+            )
+
+        bookmarks = []
+        processed_bookmarks = []
+
+        # Get already processed bookmark IDs to avoid duplicates (only if incremental)
+        processed_ids = set()
+        if db_session and incremental:
+            processed_ids = await self._get_processed_bookmark_ids(db_session)
+            logger.info(f"Incremental mode: Skipping {len(processed_ids)} already processed bookmarks")
+
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            try:
+                # Navigate to login page
+                await page.goto("https://x.com/login", wait_until="domcontentloaded", timeout=60000)
+
+                # Enter username
+                await page.fill('input[name="text"]', username)
+                await page.keyboard.press('Enter')
+                await page.wait_for_timeout(2000)
+
+                # Enter password
+                await page.fill('input[name="password"]', password)
+                await page.keyboard.press('Enter')
+
+                # Wait for login to complete
+                await page.wait_for_url("**/home", timeout=30000)
+
+                # Navigate to bookmarks
+                await page.goto("https://x.com/i/bookmarks", wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(5000)
+
+                # Scroll and collect bookmark URLs
+                collected_urls = set()
+                scroll_attempts = 0
+                max_scrolls = 20
+
+                while scroll_attempts < max_scrolls and len(collected_urls) < max_results:
+                    # Collect tweet links
+                    links = await page.query_selector_all('article a[href*="/status/"]')
+                    for link in links:
+                        href = await link.get_attribute('href')
+                        if href and '/status/' in href:
+                            # Clean URL
+                            clean_url = href.split('?')[0]
+                            if not any(skip in clean_url for skip in ['/analytics', '/photo/', '/media_tags']):
+                                full_url = f"https://x.com{clean_url}"
+                                collected_urls.add(full_url)
+
+                    # Scroll down
+                    await page.evaluate("window.scrollBy(0, 1000)")
+                    await page.wait_for_timeout(2000)
+                    scroll_attempts += 1
+
+                # Process collected URLs with thread detection
+                new_bookmarks = []
+                for i, url in enumerate(list(collected_urls)[:max_results]):
+                    # Extract tweet ID from URL
+                    tweet_id_match = re.search(r'/status/(\d+)', url)
+                    if not tweet_id_match:
+                        continue
+
+                    tweet_id = tweet_id_match.group(1)
+
+                    # Skip if already processed (incremental mode)
+                    if incremental and tweet_id in processed_ids:
+                        logger.info(f"Skipping already processed bookmark: {tweet_id}")
+                        continue
+
+                    new_bookmarks.append((url, tweet_id))
+
+                # Process new bookmarks with thread detection
+                for i, (url, tweet_id) in enumerate(new_bookmarks):
+                    # Check if this is a thread
+                    is_thread = await self._check_if_thread(page, url)
+
+                    if is_thread:
+                        # Fetch all tweets in the thread
+                        thread_tweets = await self._fetch_thread_tweets(page, url)
+                        for j, thread_tweet in enumerate(thread_tweets):
+                            thread_tweet_id = thread_tweet.get("id", f"{tweet_id}_{j}")
+                            if not incremental or thread_tweet_id not in processed_ids:
+                                thread_item = await self._create_content_item_from_tweet({
+                                    "id": thread_tweet_id,
+                                    "url": thread_tweet.get("url", url),
+                                    "text": thread_tweet.get("text", ""),
+                                    "timestamp": thread_tweet.get("timestamp", datetime.utcnow().isoformat()),
+                                    "author_username": f"thread_author_{j}",
+                                    "author_id": f"author_{tweet_id}",
+                                    "is_thread": True,
+                                    "thread_root_id": tweet_id,
+                                    "position": thread_tweet.get("position", j)
+                                })
+                                bookmarks.append(thread_item)
+
+                                # Track for persistence
+                                processed_bookmarks.append({
+                                    "tweet_id": thread_tweet_id,
+                                    "url": thread_tweet.get("url", url),
+                                    "text": thread_tweet.get("text", ""),
+                                    "author_username": f"thread_author_{j}",
+                                    "author_id": f"author_{tweet_id}",
+                                    "is_thread": True,
+                                    "thread_root_id": tweet_id,
+                                    "thread_position": thread_tweet.get("position", j),
+                                    "tweet_metadata": {"source": "thread"}
+                                })
+                    else:
+                        # Single tweet bookmark
+                        item = ContentItem(
+                            id=tweet_id,
+                            source="twitter_bookmarks_playwright",
+                            connector_type=ConnectorType.SOCIAL_MEDIA,
+                            content_type=ContentType.TEXT,
+                            title=f"Twitter Bookmark {i+1}",
+                            description="Bookmark fetched via Playwright",
+                            url=url,
+                            metadata={
+                                "platform": "twitter",
+                                "source_type": "playwright_bookmarks",
+                                "fetch_method": "playwright",
+                                "is_thread": False
+                            },
+                            last_modified=datetime.now(),
+                            tags=["twitter", "bookmark", "playwright"]
+                        )
+                        bookmarks.append(item)
+
+                        # Track for persistence
+                        processed_bookmarks.append({
+                            "tweet_id": tweet_id,
+                            "url": url,
+                            "text": "",
+                            "author_username": "unknown",
+                            "author_id": "unknown",
+                            "is_thread": False,
+                            "thread_root_id": None,
+                            "thread_position": None,
+                            "tweet_metadata": {"source": "single_bookmark"}
+                        })
+
+            except Exception as e:
+                raise Exception(f"Playwright bookmark fetching failed: {str(e)}")
+            finally:
+                await browser.close()
+
+        # Store processed bookmarks if database session provided
+        if db_session and processed_bookmarks:
+            await self._store_processed_bookmarks(db_session, processed_bookmarks)
+
+        return bookmarks
+
     async def _get_user_by_username(self, username: str) -> Dict[str, Any]:
         """Get user data by username."""
         endpoint = f"{self.api_base_url}/users/by/username/{username}"
@@ -151,28 +348,52 @@ class TwitterConnector(ContentConnector):
     async def _get_current_user_id(self) -> str:
         """Get current authenticated user ID."""
         endpoint = f"{self.api_base_url}/users/me"
+
+        # Use OAuth 2.0 bearer token (which can access user bookmarks)
         response = await self._make_authenticated_request("GET", endpoint)
 
         if response.status_code != 200:
-            raise Exception(f"Failed to get current user: HTTP {response.status_code}")
+            error_msg = f"Failed to get current user: HTTP {response.status_code}"
+            if response.status_code == 403:
+                error_msg += "\n\n🚫 FREE TIER LIMITATIONS:\n"
+                error_msg += "Twitter Free tier has severe restrictions:\n"
+                error_msg += "- 1 request per 15 minutes (PER USER + PER APP)\n"
+                error_msg += "- No bookmark.read scope available\n"
+                error_msg += "- Insufficient for any real application\n\n"
+                error_msg += "SOLUTIONS:\n"
+                error_msg += "1. Upgrade to Basic plan ($100/month)\n"
+                error_msg += "2. Use alternative data sources\n"
+                error_msg += "3. Implement web scraping (against ToS)\n"
+                error_msg += "4. Use mock data for development\n\n"
+                error_msg += "Check: https://developer.twitter.com/en/portal/dashboard"
+            elif response.status_code == 401:
+                error_msg += " - Invalid or expired OAuth 2.0 bearer token."
+            raise Exception(error_msg)
 
         return response.json_data["data"]["id"]
 
     async def _make_authenticated_request(self, method: str, url: str, params: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None) -> Any:
-        """Make authenticated request to Twitter API."""
+        """Make authenticated request to Twitter API using Bearer token (app-only)."""
         headers = {
             "Authorization": f"Bearer {self.config.credentials.get('bearer_token', '')}",
             "Content-Type": "application/json"
         }
 
+        # Build URL with query parameters if provided
+        full_url = url
+        if params:
+            from urllib.parse import urlencode
+            query_string = urlencode(params)
+            full_url = f"{url}?{query_string}"
+
         return await self.http_client.request(
             method=method,
-            url=url,
+            url=full_url,
             headers=headers,
-            params=params,
             json_data=data,
             timeout=30.0
         )
+
 
     def _parse_tweets(self, data: Dict[str, Any], source_type: str) -> List[ContentItem]:
         """Parse Twitter API response into ContentItems."""
@@ -342,7 +563,7 @@ class TwitterConnector(ContentConnector):
         capabilities.update({
             "supported_content_types": ["text"],
             "supported_operations": ["search", "timeline", "bookmarks", "single_tweet"],
-            "features": ["real_time_updates", "rate_limiting", "authentication"],
+            "features": ["real_time_updates", "rate_limiting", "authentication", "thread_detection", "bookmark_persistence"],
             "authentication_methods": ["bearer_token", "oauth2"],
             "rate_limiting": True,
             "retry_support": True,
@@ -350,6 +571,156 @@ class TwitterConnector(ContentConnector):
             "real_time_updates": True
         })
         return capabilities
+
+    async def _get_processed_bookmark_ids(self, db_session) -> set:
+        """Get set of already processed bookmark IDs."""
+        try:
+            from sqlalchemy import select
+            query = select(TwitterBookmarkTracker.tweet_id)
+            result = await db_session.execute(query)
+            processed_ids = {row[0] for row in result.all()}
+            logger.info(f"Found {len(processed_ids)} previously processed bookmarks")
+            return processed_ids
+        except Exception as e:
+            logger.warning(f"Error getting processed bookmark IDs: {e}")
+            return set()
+
+    async def _store_processed_bookmarks(self, db_session, bookmarks: List[Dict[str, Any]]):
+        """Store processed bookmark information to avoid duplicates."""
+        try:
+            from sqlalchemy import insert
+            from datetime import datetime
+            import hashlib
+
+            for bookmark in bookmarks:
+                tweet_id = bookmark.get("tweet_id")
+                if not tweet_id:
+                    continue
+
+                # Create content hash for duplicate detection
+                content = bookmark.get("text", "") + bookmark.get("url", "")
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+                bookmark_data = {
+                    "tweet_id": tweet_id,
+                    "tweet_url": bookmark.get("url", ""),
+                    "author_username": bookmark.get("author_username"),
+                    "author_id": bookmark.get("author_id"),
+                    "is_thread": bookmark.get("is_thread", False),
+                    "thread_root_id": bookmark.get("thread_root_id"),
+                    "thread_position": bookmark.get("thread_position"),
+                    "content_hash": content_hash,
+                    "processed_at": datetime.utcnow(),
+                    "last_seen_at": datetime.utcnow(),
+                    "processing_status": "processed",
+                    "tweet_metadata": bookmark.get("tweet_metadata", {})
+                }
+
+                # Insert or update (upsert)
+                await db_session.execute(
+                    insert(TwitterBookmarkTracker).values(**bookmark_data)
+                )
+
+            await db_session.commit()
+            logger.info(f"Stored {len(bookmarks)} processed bookmarks")
+
+        except Exception as e:
+            logger.error(f"Error storing processed bookmarks: {e}")
+            await db_session.rollback()
+
+    async def _check_if_thread(self, page, tweet_url: str) -> bool:
+        """Check if a tweet is part of a thread."""
+        try:
+            await page.goto(tweet_url, wait_until="domcontentloaded", timeout=10000)
+
+            # Look for thread indicators
+            thread_indicators = await page.query_selector_all('[data-testid="Tweet-User-Text"]')
+
+            # Also check for "Show thread" or similar indicators
+            thread_buttons = await page.query_selector_all('text="Show thread"')
+
+            # If there are multiple tweets from the same author or thread indicators, it's likely a thread
+            return len(thread_indicators) > 1 or len(thread_buttons) > 0
+
+        except Exception as e:
+            logger.warning(f"Error checking if tweet is thread: {e}")
+            return False
+
+    async def _fetch_thread_tweets(self, page, thread_url: str) -> List[Dict[str, Any]]:
+        """Fetch all tweets in a thread."""
+        try:
+            await page.goto(thread_url, wait_until="domcontentloaded", timeout=15000)
+
+            # Wait for thread content to load
+            await page.wait_for_timeout(2000)
+
+            # Extract thread tweets
+            thread_data = await page.evaluate("""
+                () => {
+                    const tweets = [];
+                    const tweetElements = document.querySelectorAll('article[data-testid="tweet"]');
+
+                    tweetElements.forEach((tweet, index) => {
+                        const textElement = tweet.querySelector('[data-testid="Tweet-User-Text"]');
+                        const timeElement = tweet.querySelector('time');
+                        const linkElement = tweet.querySelector('a[href*="/status/"]');
+
+                        if (textElement && timeElement) {
+                            const tweetId = linkElement ? linkElement.href.split('/status/')[1].split('/')[0] : null;
+
+                            tweets.push({
+                                id: tweetId,
+                                text: textElement.textContent || '',
+                                timestamp: timeElement.getAttribute('datetime') || new Date().toISOString(),
+                                url: linkElement ? linkElement.href : '',
+                                position: index,
+                                is_thread: true
+                            });
+                        }
+                    });
+
+                    return tweets;
+                }
+            """)
+
+            return thread_data
+
+        except Exception as e:
+            logger.error(f"Error fetching thread tweets: {e}")
+            return []
+
+    async def _extract_tweet_id_from_url(self, url: str) -> str:
+        """Extract tweet ID from Twitter URL."""
+        try:
+            if "status/" in url:
+                return url.split("status/")[1].split("?")[0].split("/")[0]
+        except:
+            pass
+        return ""
+
+    async def _create_content_item_from_tweet(self, tweet_data: Dict[str, Any]) -> ContentItem:
+        """Create a ContentItem from tweet data."""
+        tweet_id = tweet_data.get("id", "")
+        url = tweet_data.get("url", f"https://twitter.com/i/status/{tweet_id}")
+
+        return ContentItem(
+            id=tweet_id,
+            url=url,
+            title=f"Tweet by {tweet_data.get('author_username', 'Unknown')}",
+            description=tweet_data.get("text", ""),
+            content_type=ContentType.TEXT,
+            metadata={
+                "tweet_id": tweet_id,
+                "author_username": tweet_data.get("author_username"),
+                "author_id": tweet_data.get("author_id"),
+                "created_at": tweet_data.get("timestamp"),
+                "is_thread": tweet_data.get("is_thread", False),
+                "thread_position": tweet_data.get("position", 0),
+                "thread_root_id": tweet_data.get("thread_root_id"),
+                "source": "twitter_bookmark"
+            },
+            last_modified=datetime.fromisoformat(tweet_data.get("timestamp", datetime.utcnow().isoformat()))
+        )
 
 
 class RedditConnector(ContentConnector):
@@ -431,18 +802,24 @@ class RedditConnector(ContentConnector):
     async def _make_request(self, method: str, url: str, params: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None) -> Any:
         """Make request to Reddit API."""
         headers = {
-            "User-Agent": self.config.credentials.get("user_agent", "Agentic-Backend/1.0")
+            "User-Agent": self.config.credentials.get("user_agent", "Agentic-Backend/1.0") if self.config.credentials else "Agentic-Backend/1.0"
         }
 
         # Add OAuth token if available
-        if "access_token" in self.config.credentials:
+        if self.config.credentials and "access_token" in self.config.credentials:
             headers["Authorization"] = f"Bearer {self.config.credentials['access_token']}"
+
+        # Build URL with query parameters if provided
+        full_url = url
+        if params:
+            from urllib.parse import urlencode
+            query_string = urlencode(params)
+            full_url = f"{url}?{query_string}"
 
         return await self.http_client.request(
             method=method,
-            url=url,
+            url=full_url,
             headers=headers,
-            params=params,
             json_data=data,
             timeout=30.0
         )
@@ -746,16 +1123,22 @@ class LinkedInConnector(ContentConnector):
     async def _make_authenticated_request(self, method: str, url: str, params: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None) -> Any:
         """Make authenticated request to LinkedIn API."""
         headers = {
-            "Authorization": f"Bearer {self.config.credentials.get('access_token', '')}",
+            "Authorization": f"Bearer {self.config.credentials.get('access_token', '')}" if self.config.credentials else "",
             "X-Restli-Protocol-Version": "2.0.0",
             "Content-Type": "application/json"
         }
 
+        # Build URL with query parameters if provided
+        full_url = url
+        if params:
+            from urllib.parse import urlencode
+            query_string = urlencode(params)
+            full_url = f"{url}?{query_string}"
+
         return await self.http_client.request(
             method=method,
-            url=url,
+            url=full_url,
             headers=headers,
-            params=params,
             json_data=data,
             timeout=30.0
         )

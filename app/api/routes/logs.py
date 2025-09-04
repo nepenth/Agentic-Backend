@@ -25,36 +25,6 @@ class LogResponse(BaseModel):
     timestamp: str
 
 
-@router.get("/{task_id}", response_model=List[LogResponse])
-async def get_task_logs(
-    task_id: UUID,
-    level: Optional[LogLevel] = None,
-    limit: int = Query(default=100, ge=1, le=1000),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Get task execution logs with pagination and filtering."""
-    try:
-        query = select(TaskLog).where(TaskLog.task_id == task_id)
-        
-        if level:
-            query = query.where(TaskLog.level == level)
-        
-        query = query.offset(offset).limit(limit).order_by(TaskLog.timestamp.desc())
-        
-        result = await db.execute(query)
-        logs = result.scalars().all()
-        
-        return [LogResponse(**log.to_dict()) for log in logs]
-        
-    except Exception as e:
-        logger.error(f"Failed to get logs for task {task_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve logs"
-        )
-
-
 @router.get("/history", response_model=List[LogResponse])
 async def get_historical_logs(
     agent_id: Optional[UUID] = None,
@@ -71,40 +41,70 @@ async def get_historical_logs(
     try:
         query = select(TaskLog)
         filters = []
-        
+
         if agent_id:
             filters.append(TaskLog.agent_id == agent_id)
-        
+
         if task_id:
             filters.append(TaskLog.task_id == task_id)
-        
+
         if level:
             filters.append(TaskLog.level == level)
-        
+
         if start_time:
             filters.append(TaskLog.timestamp >= start_time)
-        
+
         if end_time:
             filters.append(TaskLog.timestamp <= end_time)
-        
+
         if search:
             filters.append(TaskLog.message.ilike(f"%{search}%"))
-        
+
         if filters:
             query = query.where(and_(*filters))
-        
+
         query = query.offset(offset).limit(limit).order_by(TaskLog.timestamp.desc())
-        
+
         result = await db.execute(query)
         logs = result.scalars().all()
-        
+
         return [LogResponse(**log.to_dict()) for log in logs]
-        
+
     except Exception as e:
         logger.error(f"Failed to get historical logs: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve historical logs"
+        )
+
+
+@router.get("/{task_id}", response_model=List[LogResponse])
+async def get_task_logs(
+    task_id: UUID,
+    level: Optional[LogLevel] = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Get task execution logs with pagination and filtering."""
+    try:
+        query = select(TaskLog).where(TaskLog.task_id == task_id)
+
+        if level:
+            query = query.where(TaskLog.level == level)
+
+        query = query.offset(offset).limit(limit).order_by(TaskLog.timestamp.desc())
+
+        result = await db.execute(query)
+        logs = result.scalars().all()
+
+        return [LogResponse(**log.to_dict()) for log in logs]
+
+    except Exception as e:
+        logger.error(f"Failed to get logs for task {task_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve logs"
         )
 
 

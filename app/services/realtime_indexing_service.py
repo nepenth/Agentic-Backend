@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import queue
 from queue import Queue, PriorityQueue
 import heapq
 
@@ -138,10 +139,12 @@ class RealTimeIndexingService:
                 # Mark task as done
                 self.task_queue.task_done()
 
+            except queue.Empty:
+                # Queue is empty, continue waiting
+                continue
             except Exception as e:
-                # Queue timeout or processing error
-                if not isinstance(e, asyncio.TimeoutError):
-                    logger.error(f"Worker error: {e}")
+                # Actual processing error
+                logger.error(f"Worker error: {e}")
                 continue
 
     def _process_task(self, task: IndexTask):

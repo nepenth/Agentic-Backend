@@ -145,6 +145,22 @@ class Settings(BaseSettings):
     semantic_quality_scoring_enabled: bool = Field(default=True, env="SEMANTIC_QUALITY_SCORING_ENABLED")
     semantic_usage_tracking_enabled: bool = Field(default=True, env="SEMANTIC_USAGE_TRACKING_ENABLED")
 
+    # X API Configuration (formerly Twitter) - OAuth 2.0 + Playwright
+    x_bearer_token: Optional[str] = Field(default=None, env="X_BEARER_TOKEN")
+    x_api_key: Optional[str] = Field(default=None, env="X_API_KEY")
+    x_api_secret: Optional[str] = Field(default=None, env="X_API_SECRET")
+    x_username: Optional[str] = Field(default=None, env="X_USERNAME")  # For Playwright login
+    x_password: Optional[str] = Field(default=None, env="X_PASSWORD")  # For Playwright login
+    x_base_url: str = Field(default="https://api.x.com/2", env="X_BASE_URL")
+    x_bookmark_url: Optional[str] = Field(default=None, env="X_BOOKMARK_URL")
+    x_request_timeout: int = Field(default=30, env="X_REQUEST_TIMEOUT")
+    x_max_retries: int = Field(default=3, env="X_MAX_RETRIES")
+    x_rate_limit_buffer: int = Field(default=5, env="X_RATE_LIMIT_BUFFER")
+    x_bookmarks_max_results: int = Field(default=100, env="X_BOOKMARKS_MAX_RESULTS")
+    x_bookmarks_days_back: int = Field(default=30, env="X_BOOKMARKS_DAYS_BACK")
+    x_thread_max_tweets: int = Field(default=50, env="X_THREAD_MAX_TWEETS")
+    x_use_playwright: bool = Field(default=True, env="X_USE_PLAYWRIGHT")  # Default to Playwright
+
     # Database Configuration for New Services
     db_model_performance_retention_days: int = Field(default=90, env="DB_MODEL_PERFORMANCE_RETENTION_DAYS")
     db_http_request_log_retention_days: int = Field(default=30, env="DB_HTTP_REQUEST_LOG_RETENTION_DAYS")

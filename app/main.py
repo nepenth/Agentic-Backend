@@ -68,6 +68,13 @@ async def root():
     }
 
 
+# Simple health check endpoint (for load balancers/health checks)
+@app.get("/health")
+async def simple_health_check():
+    """Simple health check endpoint for load balancers."""
+    return {"status": "healthy"}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

@@ -18,7 +18,7 @@ router = APIRouter()
 class ChatSessionCreate(BaseModel):
     session_type: str = Field(..., description="Type of chat session (agent_creation, workflow_creation, general)")
     model_name: str = Field(..., description="Ollama model to use for the chat")
-    user_id: Optional[str] = Field(None, description="User identifier")
+    user_id: str = Field(..., description="User identifier (required for session association)")
     title: Optional[str] = Field(None, description="Optional session title")
     config: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Session configuration")
 
@@ -31,6 +31,7 @@ class ChatSessionResponse(BaseModel):
     title: Optional[str]
     status: str
     is_active: bool
+    is_resumable: bool
     created_at: str
     updated_at: str
     completed_at: Optional[str]
@@ -249,15 +250,15 @@ async def send_chat_message(
 @router.put("/sessions/{session_id}/status", dependencies=[Depends(verify_api_key)])
 async def update_session_status(
     session_id: UUID,
-    status: str = Query(..., description="New status (active, completed, archived)"),
+    status: str = Query(..., description="New status (active, completed, archived, resumable)"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """Update chat session status."""
     try:
-        if status not in ["active", "completed", "archived"]:
+        if status not in ["active", "completed", "archived", "resumable"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid status. Must be: active, completed, or archived"
+                detail="Invalid status. Must be: active, completed, archived, or resumable"
             )
 
         chat_service = ChatService(db)
@@ -347,6 +348,30 @@ async def list_chat_templates():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve chat templates"
+        )
+
+
+@router.post("/cleanup", dependencies=[Depends(verify_api_key)])
+async def cleanup_old_sessions(
+    retention_days: int = Query(default=365, description="Retention period in days"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Clean up old chat sessions and messages beyond retention period."""
+    try:
+        chat_service = ChatService(db)
+        deleted_count = await chat_service.cleanup_old_sessions(retention_days)
+
+        return {
+            "message": f"Cleaned up {deleted_count} chat sessions older than {retention_days} days",
+            "deleted_sessions": deleted_count,
+            "retention_days": retention_days
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to cleanup chat sessions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cleanup chat sessions"
         )
 
 

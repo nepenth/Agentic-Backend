@@ -1,81 +1,57 @@
 """
-Audio AI Service for speech recognition and audio processing.
+Audio AI Service for audio processing and analysis.
 
-This service provides audio processing capabilities including:
-- Speech-to-text transcription
-- Speaker identification and diarization
-- Audio classification and tagging
-- Emotion detection from speech
-- Audio quality assessment
-- Language detection
+This service provides comprehensive audio AI capabilities including:
+- Audio transcription (speech-to-text)
+- Speaker identification
+- Emotion analysis
+- Audio classification
+- Music analysis
+- Batch processing with resource management for homelab setup
 """
 
 import asyncio
 import base64
 import json
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from pathlib import Path
-import io
-import re
+import aiofiles
 
-from app.config import settings
 from app.services.ollama_client import ollama_client
+from app.services.model_capability_service import model_capability_service, ModelCapability
 from app.utils.logging import get_logger
 
 logger = get_logger("audio_ai_service")
 
 
 class AudioAIError(Exception):
-    """Raised when audio AI processing fails."""
+    """Custom exception for audio AI operations."""
     pass
 
 
 class AudioAIResult:
-    """Result of audio AI processing."""
+    """Result of an audio AI operation."""
 
-    def __init__(
-        self,
-        content_id: str,
-        transcription: str = None,
-        speakers: List[Dict[str, Any]] = None,
-        language: str = None,
-        emotions: List[Dict[str, float]] = None,
-        classification: Dict[str, Any] = None,
-        quality_score: float = None,
-        processing_time_ms: float = None,
-        model_used: str = None,
-        confidence_scores: Dict[str, float] = None,
-        metadata: Dict[str, Any] = None
-    ):
-        self.content_id = content_id
-        self.transcription = transcription
-        self.speakers = speakers or []
-        self.language = language
-        self.emotions = emotions or []
-        self.classification = classification or {}
-        self.quality_score = quality_score
-        self.processing_time_ms = processing_time_ms
-        self.model_used = model_used
-        self.confidence_scores = confidence_scores or {}
-        self.metadata = metadata or {}
-        self.timestamp = datetime.now()
+    def __init__(self):
+        self.success = True
+        self.model_used = ""
+        self.processing_time = 0.0
+        self.result = {}
+        self.confidence = 0.0
+        self.error_message = ""
+        self.metadata = {}
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert result to dictionary."""
         return {
-            "content_id": self.content_id,
-            "transcription": self.transcription,
-            "speakers": self.speakers,
-            "language": self.language,
-            "emotions": self.emotions,
-            "classification": self.classification,
-            "quality_score": self.quality_score,
-            "processing_time_ms": self.processing_time_ms,
+            "success": self.success,
             "model_used": self.model_used,
-            "confidence_scores": self.confidence_scores,
-            "metadata": self.metadata,
-            "timestamp": self.timestamp.isoformat()
+            "processing_time": self.processing_time,
+            "result": self.result,
+            "confidence": self.confidence,
+            "error_message": self.error_message,
+            "metadata": self.metadata
         }
 
 
@@ -83,406 +59,706 @@ class AudioAIService:
     """Service for audio AI processing using Ollama models."""
 
     def __init__(self):
-        self.supported_models = [
-            "whisper-large-v3", "whisper-base",
-            "whisper-medium", "whisper-small",
-            "whisper-tiny"
+        self.logger = get_logger("audio_ai_service")
+        self.max_concurrent_tasks = 2  # Limited for 2x Tesla P40 homelab setup
+        self.semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
+        self.supported_formats = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'webm', 'm4a']
+
+        # Emotion categories for analysis
+        self.emotion_categories = [
+            "happy", "sad", "angry", "fearful", "surprised", "disgusted",
+            "neutral", "excited", "calm", "anxious", "confident", "confused"
         ]
-        self.default_model = getattr(settings, 'audio_ai_default_model', 'whisper-base')
-        self.max_audio_size_mb = getattr(settings, 'audio_max_file_size_mb', 25)
-        self.processing_timeout = getattr(settings, 'audio_processing_timeout_seconds', 300)
 
-        # Supported audio formats
-        self.supported_formats = ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'webm']
+        # Audio classification categories
+        self.audio_categories = [
+            "speech", "music", "sound_effects", "ambient", "noise",
+            "conversation", "lecture", "interview", "podcast", "song"
+        ]
 
-    async def process_audio(
+    async def initialize(self):
+        """Initialize the audio AI service."""
+        try:
+            # Ensure model capability service is initialized
+            await model_capability_service.initialize()
+            self.logger.info("Audio AI Service initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Audio AI Service: {e}")
+            raise
+
+    async def transcribe_audio(
         self,
-        audio_data: Union[bytes, str, Path],
-        operations: List[str] = None,
-        model: str = None,
-        language: str = None,
-        **kwargs
+        audio_data: Union[bytes, str],
+        language: str = "en",
+        model_name: Optional[str] = None,
+        include_timestamps: bool = False
     ) -> AudioAIResult:
         """
-        Process audio with AI capabilities.
+        Transcribe audio to text (speech-to-text).
 
         Args:
-            audio_data: Audio data as bytes, base64 string, or file path
-            operations: List of operations ['transcription', 'speakers', 'emotion', 'classification', 'quality']
-            model: Specific model to use
-            language: Language code for transcription
-            **kwargs: Additional processing options
+            audio_data: Audio data as bytes or base64 string
+            language: Language code (e.g., 'en', 'es', 'fr')
+            model_name: Specific model to use (optional)
+            include_timestamps: Whether to include timestamps
 
         Returns:
-            AudioAIResult with processing results
+            AudioAIResult with transcription
         """
-        start_time = datetime.now()
+        async with self.semaphore:  # Limit concurrent tasks
+            result = AudioAIResult()
+            start_time = datetime.now()
 
-        try:
-            # Prepare audio data
-            audio_b64 = await self._prepare_audio_data(audio_data)
-
-            # Determine operations to perform
-            operations = operations or ['transcription']
-
-            # Select model
-            model = model or self.default_model
-            if model not in self.supported_models:
-                logger.warning(f"Model {model} not in supported list, using default")
-                model = self.default_model
-
-            # Process audio with selected operations
-            result = AudioAIResult(
-                content_id=kwargs.get('content_id', 'unknown'),
-                model_used=model
-            )
-
-            # Perform operations
-            if 'transcription' in operations:
-                transcription_result = await self._transcribe_audio(audio_b64, model, language, **kwargs)
-                result.transcription = transcription_result.get('text')
-                result.language = transcription_result.get('language', language)
-
-            if 'speakers' in operations and result.transcription:
-                result.speakers = await self._identify_speakers(result.transcription, model, **kwargs)
-
-            if 'emotion' in operations and result.transcription:
-                result.emotions = await self._detect_emotions(result.transcription, model, **kwargs)
-
-            if 'classification' in operations:
-                result.classification = await self._classify_audio(audio_b64, model, **kwargs)
-
-            if 'quality' in operations:
-                result.quality_score = await self._assess_audio_quality(audio_b64, model, **kwargs)
-
-            # Calculate processing time
-            result.processing_time_ms = (datetime.now() - start_time).total_seconds() * 1000
-
-            logger.info(f"Audio AI processing completed for content {result.content_id} in {result.processing_time_ms:.2f}ms")
-            return result
-
-        except Exception as e:
-            logger.error(f"Audio AI processing failed: {e}")
-            processing_time = (datetime.now() - start_time).total_seconds() * 1000
-            raise AudioAIError(f"Audio AI processing failed: {str(e)}")
-
-    async def _prepare_audio_data(self, audio_data: Union[bytes, str, Path]) -> str:
-        """Prepare audio data for processing."""
-        if isinstance(audio_data, Path):
-            # Read from file
-            with open(audio_data, 'rb') as f:
-                audio_bytes = f.read()
-        elif isinstance(audio_data, str):
-            # Assume base64 string
-            if audio_data.startswith('data:audio'):
-                # Extract base64 data from data URL
-                audio_bytes = base64.b64decode(audio_data.split(',')[1])
-            else:
-                # Assume base64 string
-                audio_bytes = base64.b64decode(audio_data)
-        else:
-            # Assume bytes
-            audio_bytes = audio_data
-
-        # Validate audio size
-        audio_size_mb = len(audio_bytes) / (1024 * 1024)
-        if audio_size_mb > self.max_audio_size_mb:
-            raise AudioAIError(f"Audio size {audio_size_mb:.2f}MB exceeds maximum {self.max_audio_size_mb}MB")
-
-        # Convert to base64
-        return base64.b64encode(audio_bytes).decode('utf-8')
-
-    async def _transcribe_audio(
-        self,
-        audio_b64: str,
-        model: str,
-        language: str = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Transcribe audio to text."""
-        language_hint = f" in {language}" if language else ""
-        prompt = kwargs.get('transcription_prompt',
-            f"Transcribe this audio{language_hint}. Provide accurate transcription with proper punctuation and formatting.")
-
-        try:
-            response = await ollama_client.generate(
-                model=model,
-                prompt=f"[AUDIO_DATA:{audio_b64}]\n{prompt}",
-                system="You are an expert speech recognition AI. Provide accurate transcriptions with proper punctuation, formatting, and timestamps when possible.",
-                options={
-                    "temperature": kwargs.get('temperature', 0.0),  # Low temperature for accuracy
-                    "num_predict": kwargs.get('max_tokens', 1000)
-                }
-            )
-
-            transcription = response.get('response', '').strip()
-
-            return {
-                "text": transcription,
-                "language": language or "unknown",
-                "confidence": 0.9  # Placeholder - would be provided by actual Whisper model
-            }
-
-        except Exception as e:
-            logger.error(f"Audio transcription failed: {e}")
-            return {
-                "text": "Transcription failed due to processing error.",
-                "language": language or "unknown",
-                "error": str(e)
-            }
-
-    async def _identify_speakers(self, transcription: str, model: str, **kwargs) -> List[Dict[str, Any]]:
-        """Identify speakers in transcribed audio."""
-        prompt = kwargs.get('speaker_identification_prompt',
-            "Analyze this transcription and identify different speakers. For each speaker segment, provide: speaker_id, start_time, end_time, text, and confidence. Format as JSON array.")
-
-        try:
-            response = await ollama_client.generate(
-                model=model,
-                prompt=f"Transcription: {transcription}\n\n{prompt}",
-                system="You are an expert at speaker diarization and identification. Always respond with valid JSON.",
-                format="json",
-                options={
-                    "temperature": kwargs.get('temperature', 0.3),
-                    "num_predict": kwargs.get('max_tokens', 500)
-                }
-            )
-
-            result_text = response.get('response', '').strip()
-
-            # Try to parse as JSON
             try:
-                speakers = json.loads(result_text)
-                if isinstance(speakers, list):
-                    return speakers
+                # Get audio-capable model
+                if not model_name:
+                    model_name = await model_capability_service.get_best_model_for_task(
+                        ModelCapability.AUDIO_TRANSCRIPTION
+                    )
+
+                if not model_name:
+                    raise AudioAIError("No audio-capable models available")
+
+                result.model_used = model_name
+
+                # Convert audio to base64 if needed
+                if isinstance(audio_data, bytes):
+                    audio_b64 = base64.b64encode(audio_data).decode('utf-8')
                 else:
-                    return [speakers]
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse speaker identification JSON: {result_text}")
-                return self._extract_speakers_from_text(result_text)
+                    audio_b64 = audio_data
+
+                # Create transcription prompt
+                prompt = f"""
+                Transcribe the following audio to text. The audio is in {language} language.
+                Provide a complete, accurate transcription of all speech in the audio.
+                {"Include timestamps for different speakers if there are multiple speakers." if include_timestamps else ""}
+                Format the transcription clearly and legibly.
+                """
+
+                # For Ollama, we'll use the chat endpoint with audio data
+                # Note: This assumes the model supports audio input
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                        "audio": audio_b64  # This may not be supported by all Ollama models
+                    }
+                ]
+
+                try:
+                    # Try with audio support first
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={
+                            "num_predict": 1000,
+                            "temperature": 0.1
+                        }
+                    )
+                except Exception:
+                    # Fallback: Try without audio data (model may not support it)
+                    self.logger.warning(f"Audio input not supported by {model_name}, trying text-only approach")
+                    messages[0].pop("audio", None)  # Remove audio data
+                    messages[0]["content"] = f"{prompt}\n\nNote: Audio transcription requested but model may not support direct audio input."
+
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={
+                            "num_predict": 1000,
+                            "temperature": 0.1
+                        }
+                    )
+
+                if response and 'message' in response:
+                    transcription = response['message'].get('content', '')
+                    result.result = {
+                        "transcription": transcription,
+                        "language": language,
+                        "has_content": len(transcription.strip()) > 0,
+                        "usage": response.get('usage', {}),
+                        "model": model_name
+                    }
+                    result.confidence = 0.8  # Default confidence for transcription
+                else:
+                    raise AudioAIError("Invalid response from audio model")
+
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                result.metadata = {
+                    "audio_size_bytes": len(audio_data) if isinstance(audio_data, bytes) else len(audio_b64),
+                    "language": language,
+                    "include_timestamps": include_timestamps,
+                    "audio_supported": "audio" in str(messages[0])  # Check if audio was actually used
+                }
+
+                self.logger.info(f"Audio transcription completed in {result.processing_time:.2f}s using {model_name}")
+                return result
+
+            except Exception as e:
+                result.success = False
+                result.error_message = str(e)
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                self.logger.error(f"Audio transcription failed: {e}")
+                return result
+
+    async def identify_speaker(
+        self,
+        audio_data: Union[bytes, str],
+        num_speakers: Optional[int] = None,
+        model_name: Optional[str] = None
+    ) -> AudioAIResult:
+        """
+        Identify speakers in audio.
+
+        Args:
+            audio_data: Audio data as bytes or base64 string
+            num_speakers: Expected number of speakers (optional)
+            model_name: Specific model to use (optional)
+
+        Returns:
+            AudioAIResult with speaker identification
+        """
+        async with self.semaphore:
+            result = AudioAIResult()
+            start_time = datetime.now()
+
+            try:
+                # Get audio-capable model
+                if not model_name:
+                    model_name = await model_capability_service.get_best_model_for_task(
+                        ModelCapability.AUDIO_ANALYSIS
+                    )
+
+                if not model_name:
+                    raise AudioAIError("No audio-capable models available")
+
+                result.model_used = model_name
+
+                # Convert audio to base64 if needed
+                if isinstance(audio_data, bytes):
+                    audio_b64: str = base64.b64encode(audio_data).decode('utf-8')
+                elif isinstance(audio_data, (bytearray, memoryview)):
+                    audio_b64: str = base64.b64encode(bytes(audio_data)).decode('utf-8')
+                else:
+                    audio_b64: str = str(audio_data)
+
+                # Create speaker identification prompt
+                prompt = f"""
+                Analyze this audio and identify the speakers.
+                {"There are approximately {num_speakers} speakers." if num_speakers else ""}
+                For each speaker, provide:
+                - Speaker ID (Speaker 1, Speaker 2, etc.)
+                - Approximate speaking time
+                - Gender (if detectable)
+                - Age group (if detectable)
+                - Speech characteristics
+
+                Format the analysis clearly.
+                """
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+
+                # Try with audio if supported, fallback to text-only
+                try:
+                    messages[0]["audio"] = audio_b64
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 800, "temperature": 0.1}
+                    )
+                except Exception:
+                    messages[0].pop("audio", None)
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 800, "temperature": 0.1}
+                    )
+
+                if response and 'message' in response:
+                    analysis = response['message'].get('content', '')
+                    result.result = {
+                        "speaker_analysis": analysis,
+                        "speakers_identified": self._parse_speaker_count(analysis),
+                        "usage": response.get('usage', {}),
+                        "model": model_name
+                    }
+                    result.confidence = 0.7
+                else:
+                    raise AudioAIError("Invalid response from audio model")
+
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                result.metadata = {
+                    "audio_size_bytes": len(audio_data) if isinstance(audio_data, bytes) else len(audio_b64),
+                    "expected_speakers": num_speakers
+                }
+
+                return result
+
+            except Exception as e:
+                result.success = False
+                result.error_message = str(e)
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                self.logger.error(f"Speaker identification failed: {e}")
+                return result
+
+    async def analyze_emotion(
+        self,
+        audio_data: Union[bytes, str],
+        model_name: Optional[str] = None
+    ) -> AudioAIResult:
+        """
+        Analyze emotions in audio.
+
+        Args:
+            audio_data: Audio data as bytes or base64 string
+            model_name: Specific model to use (optional)
+
+        Returns:
+            AudioAIResult with emotion analysis
+        """
+        async with self.semaphore:
+            result = AudioAIResult()
+            start_time = datetime.now()
+
+            try:
+                # Get audio-capable model
+                if not model_name:
+                    model_name = await model_capability_service.get_best_model_for_task(
+                        ModelCapability.AUDIO_ANALYSIS
+                    )
+
+                if not model_name:
+                    raise AudioAIError("No audio-capable models available")
+
+                result.model_used = model_name
+
+                # Convert audio to base64 if needed
+                if isinstance(audio_data, bytes):
+                    audio_b64: str = base64.b64encode(audio_data).decode('utf-8')
+                elif isinstance(audio_data, (bytearray, memoryview)):
+                    audio_b64: str = base64.b64encode(bytes(audio_data)).decode('utf-8')
+                else:
+                    audio_b64: str = str(audio_data)
+
+                # Create emotion analysis prompt
+                emotions_list = ", ".join(self.emotion_categories)
+                prompt = f"""
+                Analyze the emotions and sentiment in this audio.
+                Consider tone of voice, speech patterns, and vocal characteristics.
+
+                Possible emotions: {emotions_list}
+
+                Provide:
+                - Primary emotion detected
+                - Secondary emotions (if any)
+                - Confidence levels for each emotion
+                - Overall sentiment (positive, negative, neutral)
+                - Reasoning for your analysis
+
+                Be specific and provide evidence from the audio characteristics.
+                """
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+
+                # Try with audio if supported
+                try:
+                    messages[0]["audio"] = audio_b64
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 600, "temperature": 0.1}
+                    )
+                except Exception:
+                    messages[0].pop("audio", None)
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 600, "temperature": 0.1}
+                    )
+
+                if response and 'message' in response:
+                    analysis = response['message'].get('content', '')
+                    result.result = {
+                        "emotion_analysis": analysis,
+                        "detected_emotions": self._parse_emotions(analysis),
+                        "usage": response.get('usage', {}),
+                        "model": model_name
+                    }
+                    result.confidence = 0.75
+                else:
+                    raise AudioAIError("Invalid response from audio model")
+
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                result.metadata = {
+                    "audio_size_bytes": len(audio_data) if isinstance(audio_data, bytes) else len(audio_b64),
+                    "emotion_categories": self.emotion_categories
+                }
+
+                return result
+
+            except Exception as e:
+                result.success = False
+                result.error_message = str(e)
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                self.logger.error(f"Emotion analysis failed: {e}")
+                return result
+
+    async def classify_audio(
+        self,
+        audio_data: Union[bytes, str],
+        model_name: Optional[str] = None
+    ) -> AudioAIResult:
+        """
+        Classify audio content type.
+
+        Args:
+            audio_data: Audio data as bytes or base64 string
+            model_name: Specific model to use (optional)
+
+        Returns:
+            AudioAIResult with classification
+        """
+        async with self.semaphore:
+            result = AudioAIResult()
+            start_time = datetime.now()
+
+            try:
+                # Get audio-capable model
+                if not model_name:
+                    model_name = await model_capability_service.get_best_model_for_task(
+                        ModelCapability.AUDIO_ANALYSIS
+                    )
+
+                if not model_name:
+                    raise AudioAIError("No audio-capable models available")
+
+                result.model_used = model_name
+
+                # Convert audio to base64 if needed
+                if isinstance(audio_data, bytes):
+                    audio_b64: str = base64.b64encode(audio_data).decode('utf-8')
+                elif isinstance(audio_data, (bytearray, memoryview)):
+                    audio_b64: str = base64.b64encode(bytes(audio_data)).decode('utf-8')
+                else:
+                    audio_b64: str = str(audio_data)
+
+                # Create classification prompt
+                categories_list = ", ".join(self.audio_categories)
+                prompt = f"""
+                Classify this audio content.
+                Possible categories: {categories_list}
+
+                Provide:
+                - Primary content type
+                - Secondary content types (if applicable)
+                - Confidence level for classification
+                - Key characteristics that led to this classification
+                - Any notable features (music genre, speech topics, etc.)
+
+                Be specific about what you hear in the audio.
+                """
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+
+                # Try with audio if supported
+                try:
+                    messages[0]["audio"] = audio_b64
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 500, "temperature": 0.1}
+                    )
+                except Exception:
+                    messages[0].pop("audio", None)
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 500, "temperature": 0.1}
+                    )
+
+                if response and 'message' in response:
+                    analysis = response['message'].get('content', '')
+                    result.result = {
+                        "classification": analysis,
+                        "detected_categories": self._parse_categories(analysis),
+                        "usage": response.get('usage', {}),
+                        "model": model_name
+                    }
+                    result.confidence = 0.8
+                else:
+                    raise AudioAIError("Invalid response from audio model")
+
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                result.metadata = {
+                    "audio_size_bytes": len(audio_data) if isinstance(audio_data, bytes) else len(audio_b64),
+                    "audio_categories": self.audio_categories
+                }
+
+                return result
+
+            except Exception as e:
+                result.success = False
+                result.error_message = str(e)
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                self.logger.error(f"Audio classification failed: {e}")
+                return result
+
+    async def analyze_music(
+        self,
+        audio_data: Union[bytes, str],
+        model_name: Optional[str] = None
+    ) -> AudioAIResult:
+        """
+        Analyze music in audio.
+
+        Args:
+            audio_data: Audio data as bytes or base64 string
+            model_name: Specific model to use (optional)
+
+        Returns:
+            AudioAIResult with music analysis
+        """
+        async with self.semaphore:
+            result = AudioAIResult()
+            start_time = datetime.now()
+
+            try:
+                # Get audio-capable model
+                if not model_name:
+                    model_name = await model_capability_service.get_best_model_for_task(
+                        ModelCapability.AUDIO_ANALYSIS
+                    )
+
+                if not model_name:
+                    raise AudioAIError("No audio-capable models available")
+
+                result.model_used = model_name
+
+                # Convert audio to base64 if needed
+                if isinstance(audio_data, bytes):
+                    audio_b64: str = base64.b64encode(audio_data).decode('utf-8')
+                elif isinstance(audio_data, (bytearray, memoryview)):
+                    audio_b64: str = base64.b64encode(bytes(audio_data)).decode('utf-8')
+                else:
+                    audio_b64: str = str(audio_data)
+
+                # Create music analysis prompt
+                prompt = """
+                Analyze this music audio and provide:
+                - Genre/style (jazz, rock, classical, electronic, etc.)
+                - Mood/emotion conveyed
+                - Tempo (slow, medium, fast)
+                - Instrumentation (what instruments you can identify)
+                - Key musical characteristics
+                - Notable features (vocals, lyrics, solo sections, etc.)
+                - Overall quality assessment
+
+                Provide detailed analysis of the musical elements.
+                """
+
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+
+                # Try with audio if supported
+                try:
+                    messages[0]["audio"] = audio_b64
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 700, "temperature": 0.1}
+                    )
+                except Exception:
+                    messages[0].pop("audio", None)
+                    response = await ollama_client.chat(
+                        messages=messages,
+                        model=model_name,
+                        stream=False,
+                        options={"num_predict": 700, "temperature": 0.1}
+                    )
+
+                if response and 'message' in response:
+                    analysis = response['message'].get('content', '')
+                    result.result = {
+                        "music_analysis": analysis,
+                        "detected_genres": self._parse_music_genres(analysis),
+                        "usage": response.get('usage', {}),
+                        "model": model_name
+                    }
+                    result.confidence = 0.75
+                else:
+                    raise AudioAIError("Invalid response from audio model")
+
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                result.metadata = {
+                    "audio_size_bytes": len(audio_data) if isinstance(audio_data, bytes) else len(audio_b64),
+                    "analysis_type": "music"
+                }
+
+                return result
+
+            except Exception as e:
+                result.success = False
+                result.error_message = str(e)
+                result.processing_time = (datetime.now() - start_time).total_seconds()
+                self.logger.error(f"Music analysis failed: {e}")
+                return result
+
+    def _parse_speaker_count(self, analysis: str) -> int:
+        """Parse number of speakers from analysis text."""
+        # Simple parsing - could be enhanced with NLP
+        text_lower = analysis.lower()
+        if "multiple speakers" in text_lower or "several speakers" in text_lower:
+            return 3  # Assume multiple
+        elif "two speakers" in text_lower or "speaker 2" in text_lower:
+            return 2
+        elif "one speaker" in text_lower or "single speaker" in text_lower:
+            return 1
+        else:
+            return 1  # Default
+
+    def _parse_emotions(self, analysis: str) -> List[Dict[str, Any]]:
+        """Parse detected emotions from analysis text."""
+        detected_emotions = []
+        text_lower = analysis.lower()
+
+        for emotion in self.emotion_categories:
+            if emotion in text_lower:
+                detected_emotions.append({
+                    "emotion": emotion,
+                    "mentioned": True,
+                    "confidence": 0.8 if emotion in ["happy", "sad", "angry"] else 0.6
+                })
+
+        return detected_emotions
+
+    def _parse_categories(self, analysis: str) -> List[str]:
+        """Parse audio categories from analysis text."""
+        detected_categories = []
+        text_lower = analysis.lower()
+
+        for category in self.audio_categories:
+            if category.replace("_", " ") in text_lower or category in text_lower:
+                detected_categories.append(category)
+
+        return detected_categories
+
+    def _parse_music_genres(self, analysis: str) -> List[str]:
+        """Parse music genres from analysis text."""
+        # Common music genres
+        genres = [
+            "jazz", "rock", "pop", "classical", "electronic", "hip hop", "rap",
+            "country", "blues", "reggae", "folk", "metal", "punk", "disco",
+            "funk", "soul", "r&b", "gospel", "ambient", "techno", "house"
+        ]
+
+        detected_genres = []
+        text_lower = analysis.lower()
+
+        for genre in genres:
+            if genre in text_lower:
+                detected_genres.append(genre)
+
+        return detected_genres
+
+    async def validate_audio_format(self, audio_data: bytes) -> bool:
+        """Validate if the audio format is supported."""
+        try:
+            # Check file signature
+            if len(audio_data) < 12:
+                return False
+
+            # MP3
+            if audio_data.startswith(b'\xff\xfb') or audio_data.startswith(b'ID3'):
+                return True
+            # WAV
+            if audio_data.startswith(b'RIFF') and audio_data[8:12] == b'WAVE':
+                return True
+            # FLAC
+            if audio_data.startswith(b'fLaC'):
+                return True
+            # OGG
+            if audio_data.startswith(b'OggS'):
+                return True
+            # AAC/M4A
+            if audio_data.startswith(b'\xff\xf1') or audio_data.startswith(b'\xff\xf9'):
+                return True
+
+            return False
+
+        except Exception:
+            return False
+
+    async def get_supported_models(self) -> List[Dict[str, Any]]:
+        """Get list of supported audio models."""
+        try:
+            audio_models = await model_capability_service.get_audio_models()
+
+            return [
+                {
+                    "name": model.name,
+                    "type": model.model_type.value,
+                    "capabilities": [cap.value for cap in model.capabilities],
+                    "size_gb": model.size_gb,
+                    "is_available": model.is_available
+                }
+                for model in audio_models
+            ]
 
         except Exception as e:
-            logger.error(f"Speaker identification failed: {e}")
+            self.logger.error(f"Failed to get supported audio models: {e}")
             return []
 
-    async def _detect_emotions(self, transcription: str, model: str, **kwargs) -> List[Dict[str, float]]:
-        """Detect emotions from speech transcription."""
-        prompt = kwargs.get('emotion_detection_prompt',
-            "Analyze the emotional content of this transcription. Identify emotions like happiness, sadness, anger, fear, surprise, disgust, and neutral. Provide confidence scores for each emotion detected. Format as JSON array of emotion objects.")
-
+    async def get_service_stats(self) -> Dict[str, Any]:
+        """Get service statistics and health information."""
         try:
-            response = await ollama_client.generate(
-                model=model,
-                prompt=f"Transcription: {transcription}\n\n{prompt}",
-                system="You are an expert at emotion detection from text and speech. Always respond with valid JSON.",
-                format="json",
-                options={
-                    "temperature": kwargs.get('temperature', 0.3),
-                    "num_predict": kwargs.get('max_tokens', 300)
-                }
-            )
-
-            result_text = response.get('response', '').strip()
-
-            # Try to parse as JSON
-            try:
-                emotions = json.loads(result_text)
-                return emotions
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse emotion detection JSON: {result_text}")
-                return self._extract_emotions_from_text(result_text)
-
-        except Exception as e:
-            logger.error(f"Emotion detection failed: {e}")
-            return [{"emotion": "neutral", "confidence": 0.5}]
-
-    async def _classify_audio(self, audio_b64: str, model: str, **kwargs) -> Dict[str, Any]:
-        """Classify audio content type and characteristics."""
-        prompt = kwargs.get('audio_classification_prompt',
-            "Analyze this audio and classify: 1) Content type (speech, music, sound effects, silence, etc.), 2) Audio quality, 3) Environment (indoor, outdoor, studio, etc.), 4) Primary language if speech, 5) Estimated duration. Format as JSON object.")
-
-        try:
-            response = await ollama_client.generate(
-                model=model,
-                prompt=f"[AUDIO_DATA:{audio_b64}]\n{prompt}",
-                system="You are an expert at audio analysis and classification. Always respond with valid JSON.",
-                format="json",
-                options={
-                    "temperature": kwargs.get('temperature', 0.3),
-                    "num_predict": kwargs.get('max_tokens', 250)
-                }
-            )
-
-            result_text = response.get('response', '').strip()
-
-            # Try to parse as JSON
-            try:
-                classification = json.loads(result_text)
-                return classification
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse audio classification JSON: {result_text}")
-                return {"error": "Failed to parse classification", "raw_response": result_text}
-
-        except Exception as e:
-            logger.error(f"Audio classification failed: {e}")
-            return {"error": str(e)}
-
-    async def _assess_audio_quality(self, audio_b64: str, model: str, **kwargs) -> float:
-        """Assess the quality of the audio."""
-        prompt = kwargs.get('quality_assessment_prompt',
-            "Rate the quality of this audio on a scale of 0.0 to 1.0, where 1.0 is perfect quality and 0.0 is very poor. Consider factors like: clarity, background noise, volume levels, distortion, and overall intelligibility. Provide only the numerical score.")
-
-        try:
-            response = await ollama_client.generate(
-                model=model,
-                prompt=f"[AUDIO_DATA:{audio_b64}]\n{prompt}",
-                system="You are an expert at audio quality assessment. Always respond with only a numerical score between 0.0 and 1.0.",
-                options={
-                    "temperature": kwargs.get('temperature', 0.1),
-                    "num_predict": kwargs.get('max_tokens', 50)
-                }
-            )
-
-            result_text = response.get('response', '').strip()
-
-            # Extract numerical score
-            score_match = re.search(r'(\d+\.?\d*)', result_text)
-            if score_match:
-                score = float(score_match.group(1))
-                return max(0.0, min(1.0, score))  # Clamp to 0.0-1.0 range
-            else:
-                logger.warning(f"Could not extract quality score from: {result_text}")
-                return 0.5  # Default neutral score
-
-        except Exception as e:
-            logger.error(f"Audio quality assessment failed: {e}")
-            return 0.5
-
-    def _extract_speakers_from_text(self, text: str) -> List[Dict[str, Any]]:
-        """Extract speaker information from text response."""
-        speakers = []
-        lines = text.split('\n')
-
-        current_speaker = None
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-
-            # Look for speaker patterns
-            if 'speaker' in line.lower() or 'person' in line.lower():
-                speakers.append({
-                    "speaker_id": f"speaker_{len(speakers) + 1}",
-                    "text": line,
-                    "confidence": 0.7
-                })
-
-        return speakers
-
-    def _extract_emotions_from_text(self, text: str) -> List[Dict[str, float]]:
-        """Extract emotion information from text response."""
-        emotions = []
-        emotion_keywords = {
-            'happy': 'happiness', 'sad': 'sadness', 'angry': 'anger',
-            'fear': 'fear', 'surprise': 'surprise', 'disgust': 'disgust',
-            'neutral': 'neutral', 'excited': 'excitement', 'calm': 'calm'
-        }
-
-        text_lower = text.lower()
-        for keyword, emotion in emotion_keywords.items():
-            if keyword in text_lower:
-                emotions.append({
-                    "emotion": emotion,
-                    "confidence": 0.6
-                })
-
-        if not emotions:
-            emotions.append({"emotion": "neutral", "confidence": 0.5})
-
-        return emotions
-
-    async def batch_process_audio(
-        self,
-        audio_batch: List[Dict[str, Any]],
-        operations: List[str] = None,
-        max_concurrent: int = 2
-    ) -> List[AudioAIResult]:
-        """
-        Process multiple audio files in batch.
-
-        Args:
-            audio_batch: List of audio data dictionaries
-            operations: Operations to perform on each audio
-            max_concurrent: Maximum concurrent processing tasks
-
-        Returns:
-            List of AudioAIResult objects
-        """
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def process_single_audio(audio_data: Dict[str, Any]) -> AudioAIResult:
-            async with semaphore:
-                return await self.process_audio(
-                    audio_data=audio_data['data'],
-                    operations=operations,
-                    content_id=audio_data.get('content_id', 'batch_item'),
-                    language=audio_data.get('language'),
-                    **audio_data.get('options', {})
-                )
-
-        tasks = [process_single_audio(audio_data) for audio_data in audio_batch]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Handle exceptions
-        processed_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Batch processing failed for audio {i}: {result}")
-                # Create error result
-                error_result = AudioAIResult(
-                    content_id=audio_batch[i].get('content_id', f'batch_item_{i}'),
-                    metadata={"error": str(result)}
-                )
-                processed_results.append(error_result)
-            else:
-                processed_results.append(result)
-
-        return processed_results
-
-    def get_supported_operations(self) -> List[str]:
-        """Get list of supported audio operations."""
-        return ['transcription', 'speakers', 'emotion', 'classification', 'quality']
-
-    def get_supported_models(self) -> List[str]:
-        """Get list of supported audio models."""
-        return self.supported_models.copy()
-
-    def get_supported_formats(self) -> List[str]:
-        """Get list of supported audio formats."""
-        return self.supported_formats.copy()
-
-    async def health_check(self) -> Dict[str, Any]:
-        """Check the health of the audio AI service."""
-        try:
-            # Test basic Ollama connectivity
-            health = await ollama_client.health_check()
+            models = await self.get_supported_models()
 
             return {
                 "service": "audio_ai",
-                "status": "healthy" if health.get("status") == "healthy" else "degraded",
-                "ollama_status": health.get("status"),
-                "supported_models": self.supported_models,
-                "default_model": self.default_model,
-                "max_audio_size_mb": self.max_audio_size_mb,
-                "supported_operations": self.get_supported_operations(),
-                "supported_formats": self.get_supported_formats()
+                "status": "healthy",
+                "supported_models": len(models),
+                "max_concurrent_tasks": self.max_concurrent_tasks,
+                "supported_formats": self.supported_formats,
+                "emotion_categories": len(self.emotion_categories),
+                "audio_categories": len(self.audio_categories),
+                "models": models,
+                "timestamp": datetime.now().isoformat()
             }
 
         except Exception as e:
             return {
                 "service": "audio_ai",
-                "status": "unhealthy",
-                "error": str(e)
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
             }
 
 

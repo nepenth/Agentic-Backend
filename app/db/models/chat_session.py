@@ -14,8 +14,9 @@ class ChatSession(Base):
     user_id = Column(String(255), nullable=True, index=True)  # For future user tracking
     model_name = Column(String(255), nullable=False)  # Ollama model used
     title = Column(String(500), nullable=True)  # Auto-generated or user-provided title
-    status = Column(String(50), nullable=False, default="active", index=True)  # active, completed, archived
+    status = Column(String(50), nullable=False, default="active", index=True)  # active, completed, archived, resumable
     is_active = Column(Boolean, nullable=False, default=True, index=True)
+    is_resumable = Column(Boolean, nullable=False, default=True, index=True)  # Always resumable by default
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -44,9 +45,10 @@ class ChatSession(Base):
             "title": self.title,
             "status": self.status,
             "is_active": self.is_active,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "is_resumable": self.is_resumable,
+            "created_at": self.created_at.isoformat() if self.created_at is not None else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at is not None else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at is not None else None,
             "config": self.config,
             "message_count": message_count
         }
@@ -79,5 +81,5 @@ class ChatMessage(Base):
             "message_type": self.message_type,
             "message_metadata": self.message_metadata,
             "token_count": self.token_count,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at is not None else None
         }

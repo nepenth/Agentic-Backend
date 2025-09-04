@@ -18,6 +18,10 @@ from enum import Enum
 
 from app.config import settings
 from app.utils.logging import get_logger
+from app.db.database import get_db
+from app.db.models.http_request_log import HttpRequestLog
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 logger = get_logger("agentic_http_client")
 
@@ -434,8 +438,8 @@ class AgenticHttpClient:
                     timestamp=datetime.now()
                 )
 
-                # Log request
-                self._log_request(http_response)
+                # Log request with method and URL
+                await self._log_request(http_response, method, url, headers, data)
 
                 logger.debug(f"[{request_id}] {response.status} in {duration:.2f}s")
                 return http_response
@@ -461,20 +465,69 @@ class AgenticHttpClient:
 
         return rate_info if rate_info else None
 
-    def _log_request(self, response: HttpResponse):
-        """Log request for monitoring."""
+    async def _log_request(self, response: HttpResponse, method: str, url: str, headers: Dict[str, str], data: Any):
+        """Log request for monitoring and persist to database."""
         self.request_count += 1
+
+        # Prepare request data for database
+        request_body_size = None
+        if data is not None:
+            if isinstance(data, (str, bytes)):
+                request_body_size = len(data)
+            elif isinstance(data, dict):
+                request_body_size = len(json.dumps(data).encode('utf-8'))
+
+        # Extract user agent from headers
+        user_agent = headers.get('User-Agent') or headers.get('user-agent')
+
+        # Determine if request has sensitive data (basic check)
+        has_sensitive_data = any(key.lower() in ['password', 'token', 'secret', 'key', 'auth']
+                               for key in headers.keys())
+
+        # Create database log entry
+        db_log_entry = HttpRequestLog(
+            request_id=response.request_id,
+            method=method,
+            url=url,
+            headers=headers,
+            request_body_size=request_body_size,
+            user_agent=user_agent,
+            status_code=response.status_code,
+            response_headers=response.headers,
+            response_body_size=len(response.content),
+            response_time_ms=response.request_duration * 1000,
+            retry_count=response.retry_count,
+            circuit_breaker_state=self.circuit_breaker.state.value if hasattr(self.circuit_breaker, 'state') else None,
+            rate_limit_hit=response.rate_limit_info is not None,
+            rate_limit_info=response.rate_limit_info,
+            is_success=response.status_code < 400,
+            source="agentic_http_client",
+            has_sensitive_data=has_sensitive_data,
+            completed_at=response.timestamp
+        )
+
+        # Persist to database
+        try:
+            async for session in get_db():
+                session.add(db_log_entry)
+                await session.commit()
+                logger.debug(f"Persisted HTTP request log: {response.request_id}")
+                break
+        except Exception as e:
+            logger.warning(f"Failed to persist HTTP request log: {e}")
+
+        # Keep in-memory log for backward compatibility
         self.request_log.append({
             "request_id": response.request_id,
-            "timestamp": response.timestamp.isoformat(),
-            "method": "unknown",  # Would need to be passed in
-            "url": "unknown",     # Would need to be passed in
+            "timestamp": response.timestamp.isoformat() if response.timestamp else datetime.now().isoformat(),
+            "method": method,
+            "url": url,
             "status_code": response.status_code,
             "duration": response.request_duration,
             "size": len(response.content)
         })
 
-        # Keep only last 1000 requests
+        # Keep only last 1000 requests in memory
         if len(self.request_log) > 1000:
             self.request_log = self.request_log[-1000:]
 
@@ -575,6 +628,9 @@ class AgenticHttpClient:
         if not self.session:
             await self.connect()
 
+        if not self.session:
+            raise Exception("Failed to initialize HTTP session")
+
         full_url = self._build_url(url)
         request_headers = headers.copy() if headers else {}
         request_headers = self._apply_auth(request_headers, auth)
@@ -635,6 +691,31 @@ class AgenticHttpClient:
     def get_request_log(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent request log."""
         return self.request_log[-limit:]
+
+    async def cleanup_old_logs(self, retention_days: int = 14):
+        """Clean up HTTP request logs older than retention period."""
+        try:
+            cutoff_date = datetime.now() - timedelta(days=retention_days)
+
+            async for session in get_db():
+                # Delete old HTTP request logs
+                result = await session.execute(
+                    select(HttpRequestLog).where(HttpRequestLog.created_at < cutoff_date)
+                )
+                old_logs = result.scalars().all()
+
+                deleted_count = len(old_logs)
+                for log in old_logs:
+                    await session.delete(log)
+
+                await session.commit()
+
+                logger.info(f"Cleaned up {deleted_count} HTTP request logs older than {retention_days} days")
+                break
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup old HTTP request logs: {e}")
+            raise
 
 
 # Global instance

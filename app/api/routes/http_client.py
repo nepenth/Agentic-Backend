@@ -18,6 +18,9 @@ from app.services.agentic_http_client import (
     RateLimit,
     HttpResponse
 )
+from app.db.database import get_db
+from app.db.models.http_request_log import HttpRequestLog
+from sqlalchemy import desc, select
 from app.utils.logging import get_logger
 
 logger = get_logger("http_client_routes")
@@ -224,10 +227,18 @@ async def get_request_details(request_id: str) -> Dict[str, Any]:
     including timing, headers, and any error information.
     """
     try:
-        # Get request log from HTTP client
-        request_log = agentic_http_client.get_request_log(limit=1000)
+        # Query database for the specific request
+        async for session in get_db():
+            result = await session.execute(
+                select(HttpRequestLog).where(HttpRequestLog.request_id == request_id)
+            )
+            request_log = result.scalar_one_or_none()
 
-        # Find the specific request
+            if request_log:
+                return request_log.to_dict()
+
+        # Fallback to in-memory log if not found in database
+        request_log = agentic_http_client.get_request_log(limit=1000)
         for log_entry in request_log:
             if log_entry.get("request_id") == request_id:
                 return log_entry
@@ -291,12 +302,30 @@ async def list_recent_requests(limit: int = 50) -> Dict[str, Any]:
     for monitoring and debugging purposes.
     """
     try:
-        request_log = agentic_http_client.get_request_log(limit=limit)
+        # Query database for recent requests
+        async for session in get_db():
+            result = await session.execute(
+                select(HttpRequestLog)
+                .order_by(desc(HttpRequestLog.created_at))
+                .limit(limit)
+            )
+            db_requests = result.scalars().all()
 
+            if db_requests:
+                return {
+                    "requests": [req.to_dict() for req in db_requests],
+                    "total_count": len(db_requests),
+                    "limit": limit,
+                    "source": "database"
+                }
+
+        # Fallback to in-memory log if database query fails
+        request_log = agentic_http_client.get_request_log(limit=limit)
         return {
             "requests": request_log,
             "total_count": len(request_log),
-            "limit": limit
+            "limit": limit,
+            "source": "memory"
         }
 
     except Exception as e:
