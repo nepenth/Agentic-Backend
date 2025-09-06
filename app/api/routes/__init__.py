@@ -42,6 +42,11 @@ from .advanced_analytics import router as advanced_analytics_router
 # Knowledge Base Workflow System
 from .knowledge_base_presenter import router as knowledge_base_router
 
+# Email Workflow System
+from .email_workflow import router as email_workflow_router
+from .email_chat import router as email_chat_router
+from .email_search import router as email_search_router
+
 # Create main API router
 api_router = APIRouter(prefix="/api/v1")
 
@@ -89,6 +94,11 @@ api_router.include_router(integration_layer_router, tags=["Integration Layer"])
 
 # Knowledge Base Workflow System
 api_router.include_router(knowledge_base_router, tags=["Knowledge Base"])
+
+# Email Workflow System
+api_router.include_router(email_workflow_router, prefix="/email", tags=["Email Workflow"])
+api_router.include_router(email_chat_router, prefix="/email", tags=["Email Chat"])
+api_router.include_router(email_search_router, prefix="/email", tags=["Email Search"])
 
 # WebSocket routes don't use /api/v1 prefix
 ws_router = APIRouter()

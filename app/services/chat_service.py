@@ -446,3 +446,7 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to get stats for session {session_id}: {e}")
             return {}
+
+
+# Global instance (will be initialized with database session when needed)
+chat_service = None

@@ -40,7 +40,7 @@ class KnowledgeBaseWorkflowService:
 
     def __init__(
         self,
-        db_session: AsyncSession,
+        db_session: Optional[AsyncSession],
         ollama_client: OllamaClient,
         vision_service: VisionAIService,
         semantic_service: SemanticProcessingService,
@@ -50,6 +50,7 @@ class KnowledgeBaseWorkflowService:
         workflow_settings: Optional[Dict[str, Any]] = None
     ):
         self.db = db_session
+        self.db_session_provided = db_session is not None
         self.ollama = ollama_client
         self.vision = vision_service
         self.semantic = semantic_service
@@ -94,6 +95,16 @@ class KnowledgeBaseWorkflowService:
             "embeddings": ["holistic_understanding"]
         }
 
+    async def _get_db_session(self) -> AsyncSession:
+        """Get database session, creating one if not provided"""
+        if self.db is not None:
+            return self.db
+
+        # Import here to avoid circular imports
+        from app.db.database import async_session_factory
+        session = async_session_factory()
+        return session
+
     async def process_item(self, item_id: str, start_phase: Optional[str] = None) -> Dict[str, Any]:
         """
         Main orchestration method for processing a knowledge base item
@@ -105,94 +116,103 @@ class KnowledgeBaseWorkflowService:
         Returns:
             Dict containing processing results and status
         """
-        item = await self._get_item(item_id)
-        if not item:
-            raise ValueError(f"Knowledge base item {item_id} not found")
-
-        # Determine starting phase
-        if start_phase:
-            current_phase = start_phase
-        else:
-            current_phase = await self._determine_starting_phase(item)
-
-        logger.info(f"Starting knowledge base processing for item {item_id} at phase: {current_phase}")
-
-        results = {}
-        processed_phases = []
+        # Get database session
+        db_session = await self._get_db_session()
+        self.db = db_session  # Set for use in other methods
 
         try:
-            for phase_name in self.phase_sequence[self.phase_sequence.index(current_phase):]:
-                # Check for cancellation before starting each phase
-                if await self._is_item_cancelled(item_id):
-                    logger.info(f"Processing cancelled for item {item_id} before phase {phase_name}")
-                    await self._handle_workflow_cancellation(item, f"Cancelled before phase {phase_name}")
-                    return {
-                        "item_id": item_id,
-                        "status": "cancelled",
-                        "processed_phases": processed_phases,
-                        "results": results,
-                        "current_phase": "cancelled",
-                        "cancelled_at_phase": phase_name
-                    }
+            item = await self._get_item(item_id)
+            if not item:
+                raise ValueError(f"Knowledge base item {item_id} not found")
 
-                # Check if phase should be skipped based on settings
-                if self.should_skip_phase(phase_name):
-                    logger.info(f"Skipping phase {phase_name} for item {item_id} - disabled in settings")
-                    # Mark as skipped in processing phases
-                    await self._record_phase_skipped(str(item.id), phase_name)
-                    continue
+            # Determine starting phase
+            if start_phase:
+                current_phase = start_phase
+            else:
+                current_phase = await self._determine_starting_phase(item)
 
-                if not await self._can_run_phase(item, phase_name):
-                    logger.info(f"Skipping phase {phase_name} for item {item_id} - dependencies not met")
-                    continue
+            logger.info(f"Starting knowledge base processing for item {item_id} at phase: {current_phase}")
 
-                # Select appropriate model for this phase
-                model = await self._select_model_for_phase(phase_name, item)
+            results = {}
+            processed_phases = []
 
-                # Execute phase with error handling and retry logic
-                phase_result = await self._execute_phase_with_retry(
-                    item, phase_name, model
-                )
+            try:
+                for phase_name in self.phase_sequence[self.phase_sequence.index(current_phase):]:
+                    # Check for cancellation before starting each phase
+                    if await self._is_item_cancelled(item_id):
+                        logger.info(f"Processing cancelled for item {item_id} before phase {phase_name}")
+                        await self._handle_workflow_cancellation(item, f"Cancelled before phase {phase_name}")
+                        return {
+                            "item_id": item_id,
+                            "status": "cancelled",
+                            "processed_phases": processed_phases,
+                            "results": results,
+                            "current_phase": "cancelled",
+                            "cancelled_at_phase": phase_name
+                        }
 
-                results[phase_name] = phase_result
-                processed_phases.append(phase_name)
+                    # Check if phase should be skipped based on settings
+                    if self.should_skip_phase(phase_name):
+                        logger.info(f"Skipping phase {phase_name} for item {item_id} - disabled in settings")
+                        # Mark as skipped in processing phases
+                        await self._record_phase_skipped(str(item.id), phase_name)
+                        continue
 
-                # Update item status
-                await self._update_item_phase_status(item, phase_name, "completed")
+                    if not await self._can_run_phase(item, phase_name):
+                        logger.info(f"Skipping phase {phase_name} for item {item_id} - dependencies not met")
+                        continue
 
-                # Check for cancellation after phase completion
-                if await self._is_item_cancelled(item_id):
-                    logger.info(f"Processing cancelled for item {item_id} after phase {phase_name}")
-                    await self._handle_workflow_cancellation(item, f"Cancelled after phase {phase_name}")
-                    return {
-                        "item_id": item_id,
-                        "status": "cancelled",
-                        "processed_phases": processed_phases,
-                        "results": results,
-                        "current_phase": "cancelled",
-                        "cancelled_at_phase": phase_name
-                    }
+                    # Select appropriate model for this phase
+                    model = await self._select_model_for_phase(phase_name, item)
 
-                # Check if we should continue to next phase
-                if not await self._should_continue_to_next_phase(item, phase_name):
-                    break
+                    # Execute phase with error handling and retry logic
+                    phase_result = await self._execute_phase_with_retry(
+                        item, phase_name, model
+                    )
 
-            # Mark item as fully processed if all phases completed
-            if len(processed_phases) == len(self.phase_sequence):
-                await self._mark_item_completed(item)
+                    results[phase_name] = phase_result
+                    processed_phases.append(phase_name)
 
-            return {
-                "item_id": item_id,
-                "status": "completed",
-                "processed_phases": processed_phases,
-                "results": results,
-                "current_phase": item.processing_phase
-            }
+                    # Update item status
+                    await self._update_item_phase_status(item, phase_name, "completed")
 
-        except Exception as e:
-            logger.error(f"Workflow failed for item {item_id} at phase {current_phase}: {str(e)}")
-            await self._handle_workflow_error(item, current_phase, str(e))
-            raise
+                    # Check for cancellation after phase completion
+                    if await self._is_item_cancelled(item_id):
+                        logger.info(f"Processing cancelled for item {item_id} after phase {phase_name}")
+                        await self._handle_workflow_cancellation(item, f"Cancelled after phase {phase_name}")
+                        return {
+                            "item_id": item_id,
+                            "status": "cancelled",
+                            "processed_phases": processed_phases,
+                            "results": results,
+                            "current_phase": "cancelled",
+                            "cancelled_at_phase": phase_name
+                        }
+
+                    # Check if we should continue to next phase
+                    if not await self._should_continue_to_next_phase(item, phase_name):
+                        break
+
+                # Mark item as fully processed if all phases completed
+                if len(processed_phases) == len(self.phase_sequence):
+                    await self._mark_item_completed(item)
+
+                return {
+                    "item_id": item_id,
+                    "status": "completed",
+                    "processed_phases": processed_phases,
+                    "results": results,
+                    "current_phase": item.processing_phase
+                }
+
+            except Exception as e:
+                logger.error(f"Workflow failed for item {item_id} at phase {current_phase}: {str(e)}")
+                await self._handle_workflow_error(item, current_phase, str(e))
+                raise
+        finally:
+            # Close session if we created it
+            if not self.db_session_provided:
+                await db_session.close()
 
     async def flag_for_reprocessing(self, item_id: str, phases: List[str], reason: str):
         """Flag item for reprocessing specific phases"""
@@ -782,6 +802,32 @@ class KnowledgeBaseWorkflowService:
 
     async def _determine_starting_phase(self, item: KnowledgeBaseItem) -> str:
         """Determine which phase to start processing from"""
+        # Check if item is a Twitter bookmark from Playwright fetch
+        if item.source_type == "twitter_bookmark_auto" and item.item_metadata:
+            # Item is a single bookmark from Playwright fetch, skip fetch_bookmarks
+            # Convert single bookmark to tweets format for processing
+            tweet_data = {
+                "tweet_id": item.item_metadata.get("tweet_id", ""),
+                "text": item.full_content or item.summary or "",
+                "author": item.item_metadata.get("author_username", ""),
+                "created_at": item.created_at.isoformat(),
+                "media_urls": [],  # Will be populated in cache_media phase
+                "is_thread": item.item_metadata.get("is_thread", False),
+                "thread_root_id": item.item_metadata.get("thread_root_id"),
+                "thread_position": item.item_metadata.get("thread_position", 0)
+            }
+            # Update item metadata to include tweets array
+            if not item.item_metadata:
+                item.item_metadata = {}
+            item.item_metadata["tweets"] = [tweet_data]
+            return "cache_content"
+
+        # Check if item already has bookmark data (from Playwright fetch)
+        if item.item_metadata and item.item_metadata.get("tweets"):
+            # Item already has bookmark data, skip fetch_bookmarks phase
+            return "cache_content"
+
+        # Standard phase determination logic
         if item.processing_phase == "not_started":
             return "fetch_bookmarks"
         elif item.processing_phase == "completed":

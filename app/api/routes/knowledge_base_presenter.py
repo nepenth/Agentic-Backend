@@ -2164,7 +2164,6 @@ async def process_bookmark(
     item_id: str,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    workflow_service: KnowledgeBaseWorkflowService = Depends(get_workflow_service),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
@@ -2199,7 +2198,50 @@ async def process_bookmark(
                 "processed_at": bookmark.processed_at.isoformat() if bookmark.processed_at else None
             }
 
-        # Start processing in background
+        # Create a new workflow service instance for the background task
+        # This avoids the async context issue by creating a fresh service
+        from app.services.knowledge_base_workflow_service import KnowledgeBaseWorkflowService
+        from app.services.ollama_client import ollama_client
+        from app.services.vision_ai_service import vision_ai_service
+        from app.services.semantic_processing_service import semantic_processing_service
+        from app.services.media_download_service import media_download_service
+        from app.connectors.social_media import TwitterConnector
+        from app.config import settings
+
+        # Initialize services if needed
+        await semantic_processing_service.initialize()
+        await vision_ai_service.initialize()
+
+        from app.connectors.base import ConnectorConfig
+        from app.connectors.base import ConnectorType
+
+        # Use actual X API credentials from settings
+        credentials = {}
+        if settings.x_bearer_token:
+            credentials["bearer_token"] = settings.x_bearer_token
+        if settings.x_api_key and settings.x_api_secret:
+            credentials["api_key"] = settings.x_api_key
+            credentials["api_secret"] = settings.x_api_secret
+
+        config = ConnectorConfig(
+            name="twitter_connector",
+            connector_type=ConnectorType.SOCIAL_MEDIA,
+            source_config={},
+            credentials=credentials
+        )
+        twitter_connector = TwitterConnector(config)
+
+        # Create workflow service with fresh database session
+        workflow_service = KnowledgeBaseWorkflowService(
+            db_session=None,  # Will create its own session
+            ollama_client=ollama_client,
+            vision_service=vision_ai_service,
+            semantic_service=semantic_processing_service,
+            twitter_connector=twitter_connector,
+            media_download_service=media_download_service
+        )
+
+        # Start processing in background with the new service instance
         background_tasks.add_task(workflow_service.process_item, item_id)
 
         # Update bookmark status to indicate processing has started

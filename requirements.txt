@@ -31,4 +31,5 @@ mutagen==1.47.0
 scikit-learn==1.5.2
 nltk==3.9.1
 pandas==2.2.3
+bleach==6.1.0
 playwright==1.40.0

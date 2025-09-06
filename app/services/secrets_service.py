@@ -309,3 +309,7 @@ class SecretsService:
         except Exception as e:
             logger.error(f"Failed to get secret value for agent {agent_id}, key {secret_key}: {e}")
             return None
+
+
+# Global instance (will be initialized with database session when needed)
+secrets_service = None

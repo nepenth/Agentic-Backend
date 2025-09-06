@@ -68,9 +68,14 @@ class OllamaClient:
         options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Generate text completion."""
-        if not self.session:
+        # Ensure session is available and reconnect if needed
+        if not self.session or self.session.closed:
             await self.connect()
-        
+
+        # Double-check session is still available after connect
+        if not self.session:
+            raise Exception("Failed to establish Ollama connection")
+
         model = model or self.default_model
         
         payload = {
@@ -121,9 +126,14 @@ class OllamaClient:
         options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Chat completion."""
-        if not self.session:
+        # Ensure session is available and reconnect if needed
+        if not self.session or self.session.closed:
             await self.connect()
-        
+
+        # Double-check session is still available after connect
+        if not self.session:
+            raise Exception("Failed to establish Ollama connection")
+
         model = model or self.default_model
         
         payload = {
@@ -176,9 +186,14 @@ class OllamaClient:
         model: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate embeddings."""
-        if not self.session:
+        # Ensure session is available and reconnect if needed
+        if not self.session or self.session.closed:
             await self.connect()
-        
+
+        # Double-check session is still available after connect
+        if not self.session:
+            raise Exception("Failed to establish Ollama connection")
+
         model = model or self.default_model
         
         payload = {
@@ -205,31 +220,47 @@ class OllamaClient:
     
     async def list_models(self) -> Dict[str, Any]:
         """List available models."""
-        if not self.session:
+        # Ensure session is available and reconnect if needed
+        if not self.session or self.session.closed:
             await self.connect()
-        
+
+        # Double-check session is still available after connect
+        if not self.session:
+            raise Exception("Failed to establish Ollama connection")
+
         try:
             async with self.session.get(f"{self.base_url}/api/tags") as response:
                 response.raise_for_status()
                 result = await response.json()
-                
+
                 models = [model["name"] for model in result.get("models", [])]
                 logger.debug(f"Available models: {models}")
-                
+
                 return result
-                
+
         except aiohttp.ClientError as e:
             logger.error(f"HTTP error in list_models: {e}")
+            # Reset session on HTTP errors
+            if self.session:
+                await self.disconnect()
             raise
         except Exception as e:
             logger.error(f"Error in list_models: {e}")
+            # Reset session on any error
+            if self.session:
+                await self.disconnect()
             raise
     
     async def pull_model(self, model: str) -> Dict[str, Any]:
         """Pull a model."""
-        if not self.session:
+        # Ensure session is available and reconnect if needed
+        if not self.session or self.session.closed:
             await self.connect()
-        
+
+        # Double-check session is still available after connect
+        if not self.session:
+            raise Exception("Failed to establish Ollama connection")
+
         payload = {"name": model}
         
         try:
@@ -251,9 +282,17 @@ class OllamaClient:
     
     async def health_check(self) -> Dict[str, Any]:
         """Check Ollama server health."""
-        if not self.session:
+        # Ensure session is available and reconnect if needed
+        if not self.session or self.session.closed:
             await self.connect()
-        
+
+        # Double-check session is still available after connect
+        if not self.session:
+            return {
+                "status": "unhealthy",
+                "error": "Failed to establish Ollama connection"
+            }
+
         try:
             async with self.session.get(f"{self.base_url}/api/tags") as response:
                 if response.status == 200:
@@ -268,7 +307,7 @@ class OllamaClient:
                         "status": "unhealthy",
                         "error": f"HTTP {response.status}"
                     }
-                    
+
         except Exception as e:
             return {
                 "status": "unhealthy",
